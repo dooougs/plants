@@ -1579,4 +1579,114 @@ function PlantBuilder.crown(genome, progress: number, baseCFrame: CFrame): (Vect
 	return crown, ctx.flowers
 end
 
+--[[
+	A kit of the builder's own organs, for building something plant-like
+	that isn't a grown plant (the walking plant avatar, Client/PlantAvatar):
+	stems, leaves, flowers and blades drawn exactly as a plant's are, at the
+	given detail (3 is the close-up, high-fidelity build), wherever the caller
+	puts them. Everything is in design studs and anchored in kit.model; no
+	climbing pieces, no ground clearance, no tags.
+
+	  local kit = PlantBuilder.kit(genome, { detail = 3 })
+	  kit.stem(a, ctrl, b, thickA, thickB, { node = true })
+	  kit.leaf(cf, length)        -- cf: base, LookVector along the leaf, UpVector its face
+	  kit.flower(cf, scale)       -- cf: UpVector is the way the flower faces
+	  kit.blade(name, cf, len, segs, thick, widthAt, colorAt, material, bendAt)
+	  kit.ball / kit.ellipsoid / kit.cylinder(a, b, d, color, material)
+	  kit.mark(tag)               -- parts made from now on get kit.tagOf[part] = tag
+]]
+function PlantBuilder.kit(genome, options: { [string]: any }?)
+	local opts = table.clone(options or {})
+	opts.visualOnly = true
+	local model = Instance.new("Model")
+	model.Name = opts.name or "PlantKit"
+	local ctx = makeContext(genome, 1, opts, model)
+	ctx.climb = false
+	ctx.floor = nil
+	local kit = { model = model, ctx = ctx, colors = ctx.colors, M = ctx.M, sepal = ctx.sepal, tagOf = {} }
+	local tag: any = nil
+	local before: { [Instance]: boolean } = {}
+	-- Tag every part made since the last mark with the tag then current.
+	local function sweep()
+		for _, p in model:GetChildren() do
+			if not before[p] then
+				before[p] = true
+				if tag ~= nil then
+					kit.tagOf[p] = tag
+				end
+			end
+		end
+	end
+	function kit.mark(newTag: any)
+		sweep()
+		tag = newTag
+	end
+	function kit.done(): Model
+		sweep()
+		return model
+	end
+	function kit.stem(a: Vector3, ctrl: Vector3, b: Vector3, thickA: number, thickB: number, o: { [string]: any }?)
+		local so = o or {}
+		local color = so.color or Palette.shade(ctx.colors.stem, so.shade or 0)
+		local n = so.segments or ctx.stemSegments
+		local last = a
+		for sIdx = 1, n do
+			local u = sIdx / n
+			local q = a * (1 - u) ^ 2 + ctrl * 2 * u * (1 - u) + b * u * u
+			local d = lerp(thickA, thickB, (sIdx - 0.5) / n)
+			cylinderBetween(ctx, "Stem", last, q, d, Palette.shade(color, 0.08 * (u - 0.5)), ctx.M.stem, false)
+			if sIdx < n or so.roundEnd then
+				ball(ctx, "Stem", d, q, Palette.shade(color, 0.08 * (u - 0.5)), ctx.M.stem)
+			end
+			last = q
+		end
+		if so.node then
+			local dir = (b - ctrl).Unit
+			local thick = thickB
+			if ctx.ultra then
+				ellipsoid(ctx, "Node", Vector3.new(thick * 1.3, thick * 0.45, thick * 1.3), upFrame(b, dir), Palette.shade(color, -0.15), ctx.M.joint)
+				for _, side in { -1, 1 } do
+					local scf = upFrame(b, dir) * CFrame.Angles(0, (so.az or 0) + math.pi / 2 + side * 0.5, 0) * CFrame.Angles(0.9, 0, 0)
+					local sl = math.max(0.12, thick * 0.9)
+					ellipsoid(ctx, "Sepal", Vector3.new(sl * 0.5, 0.05, sl), scf * CFrame.new(0, 0, -thick * 0.5 - sl * 0.4), Palette.shade(ctx.colors.leaf, 0.1), ctx.M.leaf)
+				end
+			end
+			ball(ctx, "Node", thick * 1.12, b, Palette.shade(color, 0.05), ctx.M.joint)
+		end
+	end
+	function kit.leaf(cf: CFrame, length: number, maturity: number?, nodeT: number?)
+		buildLeaf(ctx, cf, length, maturity or 1, nodeT or 0.5)
+	end
+	-- A leaf at a stem node, set the way growAxis sets one: round the stem
+	-- by az, lifted by elev, starting at the stem's surface.
+	function kit.nodeLeaf(nodePos: Vector3, dir: Vector3, az: number, elev: number, thick: number, length: number)
+		local lcf = upFrame(nodePos, dir) * CFrame.Angles(0, az, 0) * CFrame.Angles(elev, 0, 0) * CFrame.new(0, 0, -thick * 0.4)
+		buildLeaf(ctx, lcf, length, 1, 0.5)
+	end
+	function kit.flower(cf: CFrame, scale: number?)
+		buildFlower(ctx, cf, scale or 1)
+	end
+	function kit.blade(name: string, cf: CFrame, len: number, segs: number, thick: number, widthAt, colorAt, material, bendAt)
+		return blade(ctx, name, cf, len, segs, thick, widthAt, colorAt, material or ctx.M.leaf, bendAt)
+	end
+	function kit.ball(name: string, d: number, pos: Vector3, color: Color3, material: Enum.Material?)
+		return ball(ctx, name, d, pos, color, material or ctx.M.joint)
+	end
+	function kit.ellipsoid(name: string, size: Vector3, cf: CFrame, color: Color3, material: Enum.Material?)
+		return ellipsoid(ctx, name, size, cf, color, material or ctx.M.joint)
+	end
+	function kit.cylinder(name: string, a: Vector3, b: Vector3, d: number, color: Color3, material: Enum.Material?)
+		return cylinderBetween(ctx, name, a, b, d, color, material or ctx.M.stem, false)
+	end
+	function kit.part(name: string, shape: Enum.PartType, size: Vector3, cf: CFrame, color: Color3, material: Enum.Material?)
+		return part(ctx, name, shape, size, cf, color, material or ctx.M.joint, false)
+	end
+	kit.upFrame = upFrame
+	kit.look = look
+	kit.flowerSize = function(scale: number?): number
+		return lerp(0.6, 2.8, ctx.g.flowerSize) * (scale or 1)
+	end
+	return kit
+end
+
 return PlantBuilder
