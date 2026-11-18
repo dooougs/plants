@@ -1,0 +1,10 @@
+[package]
+name = "dooougs/plants"
+description = "Procedural Roblox plants from a compact genome: hybrids, growth, shared wind sway, climbing, and walk-in rooms that grow their own furniture"
+version = "0.1.0"
+license = "MIT"
+authors = ["dooougs"]
+realm = "shared"
+registry = "https://github.com/UpliftGames/wally-index"
+
+[dependencies]
