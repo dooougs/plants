@@ -24,6 +24,8 @@
 	    climb        true   invisible footholds so players can climb plants
 	    unions       true   smooth organs with UnionAsync (Smooth)
 	    windEffect   0.5    sway strength multiplier (0 = still plants)
+	    generator    "classic"  "synth": grow plants from the shape grammar (PlantSynth)
+	    organs       false  every leaf and petal gets its own outline at detail 3
 	  }
 ]]
 
@@ -59,6 +61,8 @@ Host.features = {
 	climb = true,
 	unions = true,
 	windEffect = 0.5,
+	generator = "classic", -- "synth": grow plants from the shape grammar (PlantSynth)
+	organs = false, -- true: every leaf and petal gets its own outline at detail 3 (PlantSynth.Organs)
 }
 
 Host.worldScale = constant(1)
