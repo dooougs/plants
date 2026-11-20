@@ -29,6 +29,9 @@
 	  Joints are listed parents first; a petal's parent is its flower head.
 	  flowers = { { cframe = CFrame, nectar = 0..1 } }
 	options = { seed: number?, detail: number? (3 close-up, 1 full, 0.5 low), plantId: string?, name: string?,
+	  synth: boolean? (grow from the shape grammar, PlantSynth; default features.generator == "synth"),
+	  examples: { string }? (with synth: grow from these PlantSynth.Corpus examples instead of the body plan's),
+	  organs: boolean? (detail 3: every leaf and petal its own outline; default features.organs),
 	  breathe: (() -> ())? (called every few parts; it may yield, to spread a big build over frames.
 	    The model then comes back held: call Smooth.release(model) once it is parented, or its
 	    unions and room shells never start) }
@@ -46,6 +49,9 @@ local Wind = require(script.Parent.Wind)
 local Smooth = require(script.Parent.Smooth)
 local Element = require(script.Parent.Element)
 local Host = require(script.Parent.Host)
+local PlantSynth = require(script.Parent.PlantSynth)
+local Organs = require(script.Parent.PlantSynth.Organs)
+local vidOf = PlantSynth.Derive.vidOf
 local Ground = {
 	heightAt = function(x: number, z: number): number
 		return Host.groundHeight(x, z)
@@ -271,6 +277,50 @@ local function blade(ctx, name: string, cf: CFrame, len: number, segs: number, t
 	return cf
 end
 
+-- A blade drawn from an organ outline (PlantSynth.Organs): one segment per
+-- letter of the chain, at that letter's width, with small teeth or fringe
+-- blocks on the rim, ruffled segments tipped up and down, and a round,
+-- pointed or notched tip. extra(centre, width, segLen, t) is called per
+-- segment, like blade's each.
+local function chainBlade(ctx, name: string, cf: CFrame, len: number, chain: Organs.Chain, maxW: number, thick: number, colorAt: (number) -> Color3, material: Enum.Material, bendAt: (number) -> number, adjust: ((CFrame, number, number) -> CFrame)?, minBase: number, extra: ((CFrame, number, number, number) -> ())?): CFrame
+	local toks = chain.toks
+	local n = #toks
+	local tip = toks[n]
+	local function widthAt(t: number): number
+		local w = maxW * Organs.widthAt(chain, t)
+		if math.floor(t * n + 0.5) == 0 then
+			return math.max(minBase, w)
+		end
+		return w
+	end
+	local function bend(j: number): number
+		local ruffle = if toks[j] == "q" then (if j % 2 == 1 then 0.35 else -0.35) else 0
+		return bendAt(j) + ruffle
+	end
+	local tipCF = blade(ctx, name, cf, len, n, thick, widthAt, colorAt, material, bend, adjust, function(centre: CFrame, width: number, segLen: number, t: number)
+		local tok = toks[math.min(n, math.floor(t * n) + 1)]
+		if tok == "t" or tok == "f" then
+			local fringe = tok == "f"
+			for _, side in { -1, 1 } do
+				local size = Vector3.new(width * (if fringe then 0.07 else 0.16), thick, segLen * (if fringe then 0.9 else 0.55))
+				part(ctx, name, Enum.PartType.Block, size, centre * CFrame.new(side * width * 0.5, 0, -segLen * 0.3) * CFrame.Angles(0, -side * (if fringe then 0.35 else 0.75), 0), colorAt(t), material, false)
+			end
+		end
+		if extra then
+			extra(centre, width, segLen, t)
+		end
+	end, tip == "r")
+	if tip == "k" then
+		-- A notched tip: two small discs either side of the midline.
+		local w = maxW * Organs.WIDTH.k
+		for _, side in { -1, 1 } do
+			local pos = tipCF.Position + tipCF.RightVector * side * w * 0.28
+			part(ctx, name, Enum.PartType.Cylinder, Vector3.new(thick * 1.02, w * 0.55, w * 0.55), CFrame.fromMatrix(pos, tipCF.UpVector, tipCF.LookVector), colorAt(1), material, false)
+		end
+	end
+	return tipCF
+end
+
 PlantBuilder.make = {
 	part = part,
 	ellipsoid = ellipsoid,
@@ -370,7 +420,8 @@ end
 
 -- sessile: the leaf grows straight out of a building's shell, with no
 -- stalk, so its blade starts right at the wall (baseCF sits a little inside it).
-local function buildLeaf(ctx, baseCF: CFrame, length: number, maturity: number, nodeT: number, sessile: boolean?)
+-- vid: the leaf's id (see organVid), for its own outline at detail 3 (ctx.organs).
+local function buildLeaf(ctx, baseCF: CFrame, length: number, maturity: number, nodeT: number, sessile: boolean?, vid: number?)
 	local g = ctx.g
 	local L = length * (0.25 + 0.75 * maturity)
 	if L < 0.08 then
@@ -414,16 +465,46 @@ local function buildLeaf(ctx, baseCF: CFrame, length: number, maturity: number, 
 		local floor = if t < 0.5 then math.max(0.1, petioleW * 1.2, if sessile then maxW * 0.45 * (1 - t * 2) else 0) else 0.05
 		return math.max(floor, maxW * math.sin(math.pi * math.clamp(t, 0, 1) ^ k))
 	end
-	blade(ctx, "Leaf", cf, bladeLen, segs, thick, widthAt, function(t: number): Color3
+	local function colorAt(t: number): Color3
 		return Palette.gradient(base, tip, t, depth)
-	end, ctx.M.leaf, function(): number
+	end
+	local function keepBend(): number
 		return bend
-	end, function(c: CFrame, segLen2: number, width: number): CFrame
+	end
+	local function lieOnGround(c: CFrame, segLen2: number, width: number): CFrame
 		-- Near the ground the blade levels off and lies along it instead.
 		return profileGeometry(ctx, "PlantLeafClearance", clearGround, ctx, c, function(c2: CFrame)
 			return c2 * CFrame.new(0, 0, -segLen2 * 0.5), Vector3.new(width, thick, segLen2 * 1.65)
 		end)
-	end, function(centre: CFrame, width: number, segLen2: number, t: number)
+	end
+	if ctx.organs and vid and not sessile then
+		-- Close up, its own outline from the organ grammar, veined the way
+		-- its example is: pinnate, parallel or palmate.
+		local chain = Organs.chain(ctx.organs.leaf, ctx.seed, vid)
+		chainBlade(ctx, "Leaf", cf, bladeLen, chain, maxW, thick, colorAt, ctx.M.leaf, keepBend, lieOnGround, math.max(0.1, petioleW * 1.2), function(centre: CFrame, width: number, segLen2: number, t: number)
+			local veinColor = Palette.shade(base:Lerp(tip, t), 0.45)
+			vein(ctx, "LeafVein", Vector3.new(math.max(0.05, width * 0.07), thick * 1.5, segLen2 * 1.15), centre * CFrame.new(0, thick * 0.4, 0), veinColor, ctx.M.joint)
+			if chain.vein == "parallel" then
+				for _, side in { -1, 1 } do
+					vein(ctx, "LeafVein", Vector3.new(math.max(0.04, width * 0.04), thick * 1.3, segLen2 * 1.1), centre * CFrame.new(side * width * 0.27, thick * 0.35, 0), veinColor, ctx.M.joint)
+				end
+			elseif chain.vein == "palmate" then
+				if t < 0.45 and width > 0.2 then
+					for _, side in { -1, 1 } do
+						vein(ctx, "LeafVein", Vector3.new(width * 0.5, thick * 1.25, 0.04 + width * 0.04), centre * CFrame.new(side * width * 0.24, thick * 0.4, 0) * CFrame.Angles(0, side * 1.0, 0), veinColor, ctx.M.joint)
+					end
+				end
+			elseif width > 0.25 then
+				for _, side in { -1, 1 } do
+					vein(ctx, "LeafVein", Vector3.new(width * 0.4, thick * 1.25, 0.04 + width * 0.04), centre * CFrame.new(side * width * 0.2, thick * 0.4, 0) * CFrame.Angles(0, side * 0.6, 0), veinColor, ctx.M.joint)
+				end
+			end
+			profileGeometry(ctx, "PlantClimb", Climb.leafFoothold, ctx, centre, width, segLen2 * 1.1, thick)
+		end)
+		ctx.joint = outerJoint
+		return
+	end
+	blade(ctx, "Leaf", cf, bladeLen, segs, thick, widthAt, colorAt, ctx.M.leaf, keepBend, lieOnGround, function(centre: CFrame, width: number, segLen2: number, t: number)
 		if ctx.ultra then
 			local veinColor = Palette.shade(base:Lerp(tip, t), 0.45)
 			vein(ctx, "LeafVein", Vector3.new(math.max(0.05, width * 0.07), thick * 1.5, segLen2 * 1.15), centre * CFrame.new(0, thick * 0.4, 0), veinColor, ctx.M.joint)
@@ -442,13 +523,16 @@ end
 ----------------------------------------------------------------------------
 -- Flowers
 
-local function buildFlower(ctx, cf: CFrame, scale: number)
+-- vid: the flower's id, for its petals' own outlines at detail 3 (ctx.organs).
+-- bud, bloom: this flower's own phases (PlantSynth staggers them up a
+-- raceme); by default the plant's.
+local function buildFlower(ctx, cf: CFrame, scale: number, vid: number?, bud: number?, bloom: number?)
 	local g = ctx.g
-	local b = Growth.phase(ctx.p, Growth.BUD)
+	local b = bud or Growth.phase(ctx.p, Growth.BUD)
 	if b <= 0 then
 		return
 	end
-	local o = Growth.phase(ctx.p, Growth.BLOOM)
+	local o = bloom or Growth.phase(ctx.p, Growth.BLOOM)
 	-- The head nods where it meets its stem (a cluster's pedicel already
 	-- opened its joint); tight buds are stiffer than open flowers.
 	local outerJoint = ctx.joint
@@ -586,13 +670,10 @@ local function buildFlower(ctx, cf: CFrame, scale: number)
 				ctx.joint = headJoint
 				continue
 			end
-			blade(ctx, "Petal", pcf, len, segs, pthick, function(t: number): number
-				return width * (0.35 + 0.65 * math.sin(math.pi * (0.15 + 0.7 * t)))
-			end, function(t: number): Color3
+			local function petalColor(t: number): Color3
 				return Palette.gradient(baseColor, tipColor, t, 0.4)
-			end, ctx.M.petal, function(j: number): number
-				return if j > 1 then -curl / (segs - 1) else 0
-			end, nil, function(seg: CFrame, w: number, sl: number, t: number)
+			end
+			local function marks(seg: CFrame, w: number, sl: number, t: number)
 				if ctx.ultra then
 					-- Nectar guide down the middle (dark at the base, fading out),
 					-- and a pale frilled rim on the outer half.
@@ -605,7 +686,21 @@ local function buildFlower(ctx, cf: CFrame, scale: number)
 						end
 					end
 				end
-			end)
+			end
+			if ctx.organs and vid then
+				-- Close up, its own outline from the organ grammar.
+				local chain = Organs.chain(ctx.organs.petal, ctx.seed, vidOf(vid, layer * 16 + i))
+				local cn = #chain.toks
+				chainBlade(ctx, "Petal", pcf, len, chain, width, pthick, petalColor, ctx.M.petal, function(j: number): number
+					return if j > 1 then -curl / (cn - 1) else 0
+				end, nil, 0.05, marks)
+			else
+				blade(ctx, "Petal", pcf, len, segs, pthick, function(t: number): number
+					return width * (0.35 + 0.65 * math.sin(math.pi * (0.15 + 0.7 * t)))
+				end, petalColor, ctx.M.petal, function(j: number): number
+					return if j > 1 then -curl / (segs - 1) else 0
+				end, nil, marks)
+			end
 			ctx.joint = headJoint
 		end
 	end
@@ -669,11 +764,11 @@ local function buildFlower(ctx, cf: CFrame, scale: number)
 	ctx.joint = outerJoint
 end
 
-local function buildFlowerCluster(ctx, tipCF: CFrame, scale: number)
+local function buildFlowerCluster(ctx, tipCF: CFrame, scale: number, vid: number?)
 	local g = ctx.g
 	local count = 1 + math.floor(g.flowersPerTip * 2.99)
 	if count == 1 then
-		buildFlower(ctx, tipCF, scale)
+		buildFlower(ctx, tipCF, scale, vid)
 		return
 	end
 	-- Not one flower to stand on, so the cluster gets a platform of its
@@ -692,7 +787,7 @@ local function buildFlowerCluster(ctx, tipCF: CFrame, scale: number)
 		-- Stalk and flower swing together from where the stalk leaves the tip.
 		local outerJoint = openJoint(ctx, "head", dcf, lerp(0.5, 1, Growth.phase(ctx.p, Growth.BLOOM)))
 		cylinderBetween(ctx, "Pedicel", dcf.Position, endPos, 0.1 * scale + 0.04, ctx.colors.stem, ctx.M.stem)
-		buildFlower(ctx, upFrame(endPos, (dcf.LookVector + tipCF.UpVector).Unit), scale * 0.7)
+		buildFlower(ctx, upFrame(endPos, (dcf.LookVector + tipCF.UpVector).Unit), scale * 0.7, if vid then vidOf(vid, i) else nil)
 		ctx.joint = outerJoint
 	end
 	if platformTop then
@@ -738,6 +833,13 @@ local function stemStep(ctx, pos: Vector3, dir: Vector3, r: Random, length: numb
 		length = room.total
 	end
 	return pos + dir * length, dir, room
+end
+
+-- A stable id for the organ in slot k at node i of the axis with this salt:
+-- the same at every growth stage and detail level, so a leaf or petal keeps
+-- its own outline (ctx.organs) as the plant grows.
+local function organVid(salt: number, i: number, k: number): number
+	return vidOf(vidOf(salt % 2147483647, i + 1), k + 1)
 end
 
 local function growAxis(ctx, startCF: CFrame, opts: AxisOptions)
@@ -977,7 +1079,7 @@ local function growAxis(ctx, startCF: CFrame, opts: AxisOptions)
 					else
 						lcf = nodeCF * CFrame.Angles(0, az, 0) * CFrame.Angles(elev, 0, 0) * CFrame.new(0, 0, -thick * 0.4)
 					end
-					buildLeaf(ctx, lcf, L, maturity, t, sessile)
+					buildLeaf(ctx, lcf, L, maturity, t, sessile, organVid(opts.salt, i, k + 1))
 				end
 			end
 		end
@@ -1037,7 +1139,7 @@ local function growAxis(ctx, startCF: CFrame, opts: AxisOptions)
 	end
 
 	if not opts.noFlower and opts.visible >= opts.nodes - 0.001 then
-		buildFlowerCluster(ctx, upFrame(pos, dir), opts.flowerScale)
+		buildFlowerCluster(ctx, upFrame(pos, dir), opts.flowerScale, organVid(opts.salt, opts.nodes, 0))
 	end
 
 	if path then
@@ -1072,6 +1174,7 @@ local function makeContext(genome, progress: number, options, model: Model?)
 	local p = math.clamp(progress, 0, 1)
 	local seed = options.seed or Genome.hash(genome)
 	local detail = options.detail or 1
+	local organs = if options.organs ~= nil then options.organs == true else Host.features.organs == true
 	local v = Growth.phase(p, Growth.VEGETATIVE)
 	local _, tint, tintAmount = Palette.biomeTint(g)
 	local function leafy(c: Color3): Color3
@@ -1136,7 +1239,13 @@ local function makeContext(genome, progress: number, options, model: Model?)
 			center = Palette.scorch(flowery(Palette.flower(g.centerHue)), Palette.FLAME_CORE, heat, 0.9),
 		},
 		rng = plantRng(seed),
+		seed = seed,
 		make = PlantBuilder.make,
+		-- The shape grammar (PlantSynth): grow from it instead of growAxis's
+		-- body plan, and close up, give each leaf and petal its own outline.
+		synth = if options.synth ~= nil then options.synth == true else Host.features.generator == "synth",
+		examples = if type(options.examples) == "table" then options.examples else nil,
+		organs = if detail >= 2 and organs then Organs.forGenes(g) else nil,
 	}
 end
 
@@ -1247,6 +1356,117 @@ function PlantBuilder.groundHall(genes): Habitat.Room
 	return Habitat.room(genes, 0, 1, mainStemThickness(genes) / 2)
 end
 
+----------------------------------------------------------------------------
+-- Plants from the shape grammar (PlantSynth)
+
+-- Draws a PlantSynth layout with the same organs as growAxis: stems as
+-- curved, tapering pieces with node collars, leaves (buildLeaf), flowers
+-- (buildFlower) on pedicels where they sit beside the axis, and the main
+-- axis climbable the way the classic main stem is.
+local function growSynth(ctx, start: CFrame)
+	local graph = PlantSynth.graph(ctx.genome, ctx.seed, ctx.examples)
+	local L = PlantSynth.Layout.layout(graph, ctx.g, ctx.p)
+	local function at(v: Vector3): Vector3
+		return start:PointToWorldSpace(v)
+	end
+	local function along(v: Vector3): Vector3
+		return start:VectorToWorldSpace(v)
+	end
+
+	-- The climbable line: the main axis (a rosette's flower stalk is not on
+	-- it; a rosette is climbed on its leaves).
+	local path = nil
+	if L.upright and #L.main >= 2 then
+		local d = math.max(L.mainDiameter, 0.1)
+		profileGeometry(ctx, "PlantClimb", Climb.setLine, ctx, at(L.main[1]), along(Vector3.yAxis), d)
+		path = { { pos = at(L.main[1]), d = d } }
+		local top, below = L.main[#L.main], L.main[#L.main - 1]
+		ctx.crown = upFrame(at(top), along((top - below).Unit))
+	end
+
+	for _, s in L.stems do
+		if ctx.breathe then
+			ctx.breathe()
+		end
+		local a, b, ctrl = at(s.a), at(s.b), at(s.ctrl)
+		local dir = (b - a).Unit
+		local color = Palette.shade(ctx.colors.stem, -0.3 + 0.45 * s.t)
+		if path and s.main then
+			profileGeometry(ctx, "PlantClimb", Climb.stemPiece, ctx, a, b, s.d0)
+			table.insert(path, { pos = b, d = s.d1 })
+		elseif (s.kind == "S" or s.kind == "V") and not s.main then
+			profileGeometry(ctx, "PlantClimb", Climb.branchFoothold, ctx, a, b, s.d0)
+		end
+		-- This stretch of stem (and the node ball on top) unions into one piece.
+		ctx.stemGroup = {}
+		if ctx.ultra then
+			local n = ctx.stemSegments
+			local last = a
+			for sIdx = 1, n do
+				local u = sIdx / n
+				local q = a * (1 - u) ^ 2 + ctrl * 2 * u * (1 - u) + b * u * u
+				local d = lerp(s.d0, s.d1, (sIdx - 0.5) / n)
+				cylinderBetween(ctx, "Stem", last, q, d, Palette.shade(color, 0.08 * (u - 0.5)), ctx.M.stem)
+				if sIdx < n then
+					ball(ctx, "Stem", d, q, Palette.shade(color, 0.08 * (u - 0.5)), ctx.M.stem)
+				end
+				last = q
+			end
+			if s.kind ~= "R" and s.kind ~= "I" then
+				-- A node collar and a pair of stipules, as on the classic stem.
+				ellipsoid(ctx, "Node", Vector3.new(s.d0 * 1.3, s.d0 * 0.45, s.d0 * 1.3), upFrame(b, dir), Palette.shade(color, -0.15), ctx.M.joint)
+				local sr = ctx.rng(977, s.vid)
+				local saz = sr:NextNumber() * TAU
+				for _, side in { -1, 1 } do
+					local scf = upFrame(b, dir) * CFrame.Angles(0, saz + side * 0.5, 0) * CFrame.Angles(0.9, 0, 0)
+					local sl = math.max(0.12, s.d0 * sr:NextNumber(0.7, 1.1))
+					ellipsoid(ctx, "Sepal", Vector3.new(sl * 0.5, 0.05, sl), scf * CFrame.new(0, 0, -s.d0 * 0.5 - sl * 0.4), Palette.shade(ctx.colors.leaf, 0.1), ctx.M.leaf)
+				end
+			end
+		else
+			cylinderBetween(ctx, "Stem", a, b, lerp(s.d0, s.d1, 0.5 / ctx.stemSegments), color, ctx.M.stem)
+		end
+		if s.kind ~= "R" then
+			ball(ctx, "Node", s.d1 * 1.12, b, Palette.shade(color, 0.05), ctx.M.joint)
+		end
+		ctx.stemGroup = nil
+	end
+
+	for _, lf in L.leaves do
+		local pos = at(lf.pos)
+		local lcf = look(pos, pos + along(lf.dir)) * CFrame.new(0, 0, -lf.stemD * 0.4)
+		buildLeaf(ctx, lcf, lf.len, lf.maturity, lf.nodeT, false, lf.vid)
+	end
+
+	for _, f in L.flowers do
+		local cf = upFrame(at(f.pos), along(f.dir)) * CFrame.Angles(0, f.az, 0)
+		local outerJoint = ctx.joint
+		if f.pedicel then
+			-- Stalk and flower swing together from where the stalk leaves the axis.
+			local pa, pb = at(f.pedicel.a), at(f.pedicel.b)
+			openJoint(ctx, "head", look(pa, pb), lerp(0.5, 1, f.bloom))
+			cylinderBetween(ctx, "Pedicel", pa, pb, f.pedicel.d, ctx.colors.stem, ctx.M.stem)
+		end
+		local line = ctx.climbLine
+		if f.top and path then
+			-- Nothing above the top of the main axis is in a climber's way, so
+			-- its flower can be stood on, as in growAxis.
+			ctx.climbLine = nil
+			ctx.climbTop = true
+			ctx.topPlatform = nil
+		end
+		buildFlower(ctx, cf, f.scale, f.vid, f.bud, f.bloom)
+		ctx.climbTop = nil
+		ctx.climbLine = line
+		ctx.joint = outerJoint
+	end
+
+	if path and not ctx.topPlatform then
+		profileGeometry(ctx, "PlantClimb", Climb.landing, ctx, path) -- no open flower to stand on yet
+	end
+	ctx.topPlatform = nil
+end
+
 local function run(ctx, baseCF: CFrame)
 	local g, p = ctx.g, ctx.p
 
@@ -1325,6 +1545,13 @@ local function run(ctx, baseCF: CFrame)
 			local size = (0.25 + 0.75 * sprout) * c
 			ellipsoid(ctx, "Cotyledon", Vector3.new(0.5, 0.07, 0.65) * size, lcf * CFrame.new(0, 0, -0.32 * size), Palette.shade(ctx.colors.leaf, 0.15), ctx.M.leaf)
 		end
+	end
+
+	if ctx.synth and not building then
+		-- Grown from the shape grammar instead (building plants keep the
+		-- classic stem their rooms are planned on).
+		growSynth(ctx, start)
+		return
 	end
 
 	if g.form < 0.3 and not building then

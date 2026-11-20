@@ -56,3 +56,47 @@ Call `configure` once, before any plant module is used.
 | `features.climb` | `true` | climbing footholds |
 | `features.unions` | `true` | smooth organs with UnionAsync |
 | `features.windEffect` | `0.5` | sway strength, `0` for still plants |
+| `features.generator` | `"classic"` | `"synth"` grows plants from the shape grammar (see below) |
+| `features.organs` | `false` | every leaf and petal gets its own outline at detail 3 |
+
+## Shape grammar (PlantSynth)
+
+`PlantSynth` grows plants from a grammar learned from a dozen hand-drawn
+example skeletons (after Merrell, *Example-Based Procedural Modeling Using
+Graph Grammars*, 2023). Besides the six classic body plans it can grow
+compound fronds, whorls, racemes and spikes, umbels on side shoots, forks
+that fork again, trailing vines, and hybrids of two of these.
+
+```lua
+Plants.configure({ features = { generator = "synth", organs = true } })
+
+-- or per build:
+PlantBuilder.build(genome, progress, cf, { synth = true, examples = { "fern", "lily" } })
+```
+
+- A plant grows from its body plan's example (`PlantIndex.bodyOf`). The
+  `donor` gene, away from 0.4 to 0.6, mixes in a second example; about 1 wild
+  plant in 6 is such a hybrid.
+- `organs = true` gives each leaf and petal its own outline at detail 3, from a
+  small grammar of outlines (lance, oval, heart, strap, toothed, oak, cut;
+  round, strap, spoon, notched, fringed, frilly, pointed) steered by
+  `leafShape`, `petalWidth` and the `leafEdge` and `petalEdge` genes. It works
+  with either generator.
+- Determinism, growth and detail coherence hold as for classic plants: the
+  skeleton is derived once per genome, and every choice is seeded by a stable
+  per-node id.
+- Building plants (habitat) keep the classic stem their rooms are planned on.
+- `PlantSynth.showcase()` lists eight plants the classic builder can't make
+  (frond plant, whorl lily, candelabra, umbel shrub, trailing vine, flower
+  spike and two hybrids), to try it out:
+
+  ```lua
+  for i, item in Plants.PlantSynth.showcase() do
+      local model = Plants.PlantBuilder.build(item.genome, 1, CFrame.new(i * 25, 0, 0),
+          { synth = true, examples = item.examples, detail = 3 })
+      model.Parent = workspace
+  end
+  ```
+- Both switches are off by default. With them off every plant builds exactly
+  as before, and `Genome.hash` ignores the three new genes, so saved plants
+  keep their shapes. `PlantSynth.Corpus.add(id, name, src)` adds an example.

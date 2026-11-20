@@ -16,6 +16,7 @@
 	  Palette       the art style: colours and materials
 	  PlantIndex    collectable index of plant kinds
 	  PlantBuilder  builds a plant model (and its rooms) from a genome
+	  PlantSynth    plants grown from a shape grammar learned from example plants
 	  Wind          deterministic shared wind and sway (pure function of seed + clock)
 	  Climb         footholds and stem lines for climbing plants
 	  Smooth        unions organ pieces into smooth shapes over frames

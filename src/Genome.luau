@@ -64,7 +64,15 @@ Genome.GENES = {
 	"stiffness", -- how much the stem resists wind: 0 floppy and swaying, 1 stiff and quick
 	"fire", -- element: 0 a water plant, 1 a fire plant (fed lava), 0.5 a steam plant (both); see Shared.Plants.Element
 	"glow", -- >= GLOW_THRESHOLD: a light plant, its flowers are little lamps (brighter the higher it is)
+	-- Shape grammar genes (PlantSynth). 0.5 is plain, so older strings change nothing.
+	"donor", -- away from 0.4..0.6: the body plan mixes in a second example plant (a hybrid shape)
+	"leafEdge", -- low: toothed and cut leaves, high: lobed (close up, with features.organs)
+	"petalEdge", -- low: fringed and notched petals, high: pointed and frilly
 }
+
+-- Genome.hash reads only the genes up to here, so genes appended after
+-- them never reseed a plant's shape (old plants keep theirs exactly).
+Genome.HASHED_GENES = 35
 
 -- What a gene is when a genome string is too old to have it (0.5 otherwise).
 Genome.DEFAULTS = { fire = 0, glow = 0 } :: { [string]: number }
@@ -77,6 +85,8 @@ local function snapGene(name: string, value: number): number
 	return value
 end
 
+assert(Genome.GENES[Genome.HASHED_GENES] == "glow", "Genome: HASHED_GENES must end at glow")
+
 Genome.HABITAT_THRESHOLD = 0.9
 -- Light plants: glow at or over this. Rare in the wild (about 1 in 28,
 -- see fromSeed); a hybrid takes its glow whole from one parent or the other.
@@ -84,6 +94,8 @@ Genome.GLOW_THRESHOLD = 0.8
 
 -- Genes that live on a colour ring and must be blended around the circle.
 Genome.HUE_GENES = { flowerHue = true, flowerHue2 = true, centerHue = true }
+
+export type LinkageGroup = { name: string, label: string, genes: { string }, late: boolean? }
 
 -- Linkage groups. Every gene must appear in exactly one group. Each group
 -- has a stable name (used by Genome.splice's lockGroup option) and a
@@ -98,7 +110,10 @@ Genome.LINKAGE = {
 	{ name = "habitat", label = "Habitat", genes = { "habitat" } },
 	{ name = "element", label = "Water or fire", genes = { "fire" } },
 	{ name = "glow", label = "Glowing flowers", genes = { "glow" } },
-}
+	-- late: rolled after the mutation pass in splice, so hybrids of the
+	-- groups above come out exactly as they did before this group existed.
+	{ name = "grammar", label = "Shape grammar", genes = { "donor", "leafEdge", "petalEdge" }, late = true },
+} :: { LinkageGroup }
 
 --[[
 	Archetypes give wild plants recognisable body plans. A wild genome is an
@@ -174,6 +189,9 @@ function Genome.fromSeed(seed: number, archetype: string?): Genome
 	genes.glow = genes.glow ^ 6
 	-- Wild plants are water plants, except in the Ember biome (Genome.ignite).
 	genes.fire = 0
+	-- Most wild plants have a pure body plan; about 1 in 6 is a hybrid shape.
+	local d = genes.donor
+	genes.donor = if d < 0.08 then d / 0.08 * 0.4 elseif d > 0.92 then 0.6 + (d - 0.92) / 0.08 * 0.4 else 0.5
 	return { v = Genome.VERSION, gen = 0, genes = finish(genes) }
 end
 
@@ -205,8 +223,11 @@ function Genome.clone(g: Genome): Genome
 	return { v = g.v, gen = g.gen, genes = table.clone(g.genes) }
 end
 
-local function mutateInPlace(genes: Genes, rng: Random, rate: number, amount: number)
-	for _, name in Genome.GENES do
+local function mutateInPlace(genes: Genes, rng: Random, rate: number, amount: number, only: { string }?)
+	for _, name in only or Genome.GENES do
+		if genes[name] == nil then
+			continue -- a late group not rolled yet (see splice); it is mutated with its roll
+		end
 		if rng:NextNumber() < rate then
 			genes[name] += rng:NextNumber(-amount, amount)
 		end
@@ -275,9 +296,7 @@ function Genome.splice(a: Genome, b: Genome, seed: number?, options: SpliceOptio
 	local rng = rngFrom(seed)
 	local lock = options and options.lockGroup
 	local genes: Genes = {}
-	for _, group in Genome.LINKAGE do
-		-- Always draw the roll so a lock does not shift the other groups' rolls.
-		local roll = rng:NextNumber()
+	local function inherit(group, roll: number)
 		if lock and lock.group == group.name then
 			roll = if lock.from == "b" then 0.5 else 0
 		end
@@ -288,7 +307,8 @@ function Genome.splice(a: Genome, b: Genome, seed: number?, options: SpliceOptio
 		local fromA = if element then 1 / 3 elseif whole then 0.5 else 0.4
 		local fromB = if element then 2 / 3 elseif whole then 1 else 0.8
 		for _, name in group.genes do
-			local ga, gb = a.genes[name], b.genes[name]
+			local ga = a.genes[name] or Genome.DEFAULTS[name] or 0.5
+			local gb = b.genes[name] or Genome.DEFAULTS[name] or 0.5
 			if roll < fromA then
 				genes[name] = ga
 			elseif roll < fromB then
@@ -305,8 +325,20 @@ function Genome.splice(a: Genome, b: Genome, seed: number?, options: SpliceOptio
 			end
 		end
 	end
+	for _, group in Genome.LINKAGE do
+		if not group.late then
+			-- Always draw the roll so a lock does not shift the other groups' rolls.
+			inherit(group, rng:NextNumber())
+		end
+	end
 	local rate, amount = Genome.mutationFor(options and options.quality)
 	mutateInPlace(genes, rng, rate, amount)
+	for _, group in Genome.LINKAGE do
+		if group.late then
+			inherit(group, rng:NextNumber())
+			mutateInPlace(genes, rng, rate, amount, group.genes)
+		end
+	end
 	if lock then
 		-- A locked group comes through exactly as the parent had it.
 		local group = Genome.findGroup(lock.group)
@@ -361,8 +393,14 @@ function Genome.decode(s: string): Genome?
 end
 
 -- Stable 31-bit hash of a genome, used to seed per-plant shape variation.
+-- Only the first HASHED_GENES genes count, so appending a gene doesn't move
+-- every existing plant's seed.
 function Genome.hash(g: Genome): number
-	local s = Genome.encode(g)
+	local parts = table.create(Genome.HASHED_GENES)
+	for i = 1, Genome.HASHED_GENES do
+		parts[i] = string.format("%02x", math.floor(g.genes[Genome.GENES[i]] * 255 + 0.5))
+	end
+	local s = string.format("%d.%d.%s", g.v, g.gen, table.concat(parts))
 	local h = 5381
 	for i = 1, #s do
 		h = (h * 33 + string.byte(s, i)) % 2147483647
