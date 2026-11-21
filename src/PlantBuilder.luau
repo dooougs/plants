@@ -1327,10 +1327,67 @@ function PlantBuilder.stemBaseRadius(genome: Genome.Genome, progress: number): n
 	return math.max(MIN, diameter * scale) * WORLD / 2
 end
 
+-- liftFor for a building plant whose rooms are on any stem (PlantSynth.Rooms):
+-- the rooms are already laid out (L, round the base), so check the land
+-- under each one.
+local function liftForLayout(ctx, baseCF: CFrame, L): (number, boolean)
+	if #L.rooms == 0 then
+		return 0, false
+	end
+	local bp = baseCF.Position
+	local ok, h0 = pcall(Ground.heightAt, bp.X, bp.Z)
+	if not ok or (bp.Y - h0) / WORLD > OFF_GROUND then
+		return 0, false
+	end
+	local function landAt(p: Vector3): number
+		if ctx.breathe then
+			ctx.breathe()
+		end
+		local h = profileGeometry(ctx, "PlantTerrain", Ground.heightAt, bp.X + (p.X - bp.X) * WORLD, bp.Z + (p.Z - bp.Z) * WORLD)
+		return bp.Y + (h - bp.Y) / WORLD
+	end
+	ctx.landAt = landAt
+	local need, hall = 0, false
+	for _, R in L.rooms do
+		local bottom = CFrame.new(baseCF:PointToWorldSpace(R.bottom)) * baseCF.Rotation
+		need = math.max(need, Habitat.groundNeed(R.room, bottom, landAt))
+		hall = hall or R.room.ground
+	end
+	return math.min(need, MAX_LIFT), hall
+end
+
+-- Does this plant grow from the shape grammar? Building plants only when
+-- their rooms go on any stem (they always do then, so everyone agrees where
+-- the rooms are); other plants when the game (or options.synth) says so.
+local function usesSynth(genome, synthOption: boolean?): boolean
+	if Genome.hasHabitat(genome) then
+		return Genome.roomsAnywhere(genome)
+	end
+	if synthOption ~= nil then
+		return synthOption
+	end
+	return Host.features.generator == "synth"
+end
+
 -- The mature main stem's tip and base diameter in world studs, without
 -- creating parts. A rosette's visible stem is its flower stalk.
 function PlantBuilder.matureStem(genome, baseCF: CFrame): (Vector3, number)
 	local building = Genome.hasHabitat(genome)
+	if usesSynth(genome) then
+		local plan = if building then PlantSynth.roomPlan(genome) else nil
+		if plan or not building then
+			local L = PlantSynth.layout(genome, 1, nil, nil, if plan then { rooms = plan.rooms, pruned = plan.pruned, swell = 1 } else nil)
+			if #L.main >= 2 then
+				local lift = 0
+				if plan then
+					lift = liftForLayout({ breathe = nil, measureParts = false }, baseCF, L)
+				end
+				local tip = baseCF:PointToWorldSpace(L.main[#L.main]) + Vector3.yAxis * lift
+				local d = if L.stems[1] then L.stems[1].d0 else L.mainDiameter
+				return baseCF.Position + (tip - baseCF.Position) * WORLD, math.max(MIN, d) * WORLD
+			end
+		end
+	end
 	local ctx = {
 		g = genome.genes,
 		upright = baseCF,
@@ -1363,9 +1420,8 @@ end
 -- curved, tapering pieces with node collars, leaves (buildLeaf), flowers
 -- (buildFlower) on pedicels where they sit beside the axis, and the main
 -- axis climbable the way the classic main stem is.
-local function growSynth(ctx, start: CFrame)
-	local graph = PlantSynth.graph(ctx.genome, ctx.seed, ctx.examples)
-	local L = PlantSynth.Layout.layout(graph, ctx.g, ctx.p)
+local function growSynth(ctx, start: CFrame, laidOut: any?)
+	local L = laidOut or PlantSynth.layout(ctx.genome, ctx.p, ctx.seed, ctx.examples)
 	local function at(v: Vector3): Vector3
 		return start:PointToWorldSpace(v)
 	end
@@ -1384,6 +1440,9 @@ local function growSynth(ctx, start: CFrame)
 		ctx.crown = upFrame(at(top), along((top - below).Unit))
 	end
 
+	-- Side shoots with a room on them are climbed like the classic stem's
+	-- branches: each its own chain, leaving the main stem where it grows.
+	local chains = {}
 	for _, s in L.stems do
 		if ctx.breathe then
 			ctx.breathe()
@@ -1391,15 +1450,65 @@ local function growSynth(ctx, start: CFrame)
 		local a, b, ctrl = at(s.a), at(s.b), at(s.ctrl)
 		local dir = (b - a).Unit
 		local color = Palette.shade(ctx.colors.stem, -0.3 + 0.45 * s.t)
-		if path and s.main then
-			profileGeometry(ctx, "PlantClimb", Climb.stemPiece, ctx, a, b, s.d0)
-			table.insert(path, { pos = b, d = s.d1 })
-		elseif (s.kind == "S" or s.kind == "V") and not s.main then
+		local room = s.room
+		-- Through a room the stem runs straight up, slim inside it and flaring
+		-- to full thickness at the floor and ceiling (Habitat.stemRadius).
+		local pieces = nil
+		if room then
+			pieces = {}
+			local ys = Habitat.stemProfile(room, if ctx.ultra then 4 else 2)
+			for k = 1, #ys - 1 do
+				local y0, y1 = ys[k], ys[k + 1]
+				table.insert(pieces, { a = a + dir * y0, b = a + dir * y1, d = 2 * Habitat.stemRadius(room, (y0 + y1) / 2, s.d1 / 2) })
+			end
+			profileGeometry(ctx, "PlantHabitat", Habitat.build, ctx, CFrame.new(a) * start.Rotation, room, s.d0 / 2, s.d1 / 2, color)
+		end
+		local climbed = path and (s.main or L.climbAxes[s.axis])
+		if climbed then
+			local chain = nil
+			if not s.main then
+				chain = chains[s.axis]
+				if not chain then
+					local prevChain, prevFrom = Climb.beginBranch(ctx)
+					chain = { id = ctx.climbChain, from = ctx.climbFrom }
+					chains[s.axis] = chain
+					Climb.endBranch(ctx, prevChain, prevFrom)
+				end
+				ctx.climbChain, ctx.climbFrom = chain.id, chain.from
+			end
+			if room then
+				-- The climbable stem slims with the visible one, so climbers hug it
+				-- inside the room and go up through the floor's hole round it.
+				local ys = Habitat.stemProfile(room, 3)
+				for k = 1, #ys - 1 do
+					local y0, y1 = ys[k], ys[k + 1]
+					local d = 2 * Habitat.stemRadius(room, (y0 + y1) / 2, s.d1 / 2)
+					profileGeometry(ctx, "PlantClimb", Climb.stemPiece, ctx, a + dir * y0, a + dir * y1, d)
+				end
+			else
+				profileGeometry(ctx, "PlantClimb", Climb.stemPiece, ctx, a, b, s.d0)
+			end
+			if s.main then
+				table.insert(path, { pos = b, d = s.d1 })
+			else
+				ctx.climbChain, ctx.climbFrom = nil, nil
+			end
+		end
+		if (s.kind == "S" or s.kind == "V") and not s.main and not room then
 			profileGeometry(ctx, "PlantClimb", Climb.branchFoothold, ctx, a, b, s.d0)
 		end
 		-- This stretch of stem (and the node ball on top) unions into one piece.
 		ctx.stemGroup = {}
-		if ctx.ultra then
+		if pieces then
+			for k, piece in pieces do
+				local shade = Palette.shade(color, 0.08 * (k / #pieces - 0.5))
+				cylinderBetween(ctx, "Stem", piece.a, piece.b, piece.d, shade, ctx.M.stem)
+				if k < #pieces then
+					-- round off the joint, as wide as the narrower of the two pieces
+					ball(ctx, "Stem", math.min(piece.d, pieces[k + 1].d), piece.b, shade, ctx.M.stem)
+				end
+			end
+		elseif ctx.ultra then
 			local n = ctx.stemSegments
 			local last = a
 			for sIdx = 1, n do
@@ -1412,8 +1521,9 @@ local function growSynth(ctx, start: CFrame)
 				end
 				last = q
 			end
-			if s.kind ~= "R" and s.kind ~= "I" then
-				-- A node collar and a pair of stipules, as on the classic stem.
+			if s.kind ~= "R" and s.kind ~= "I" and not s.under then
+				-- A node collar and a pair of stipules, as on the classic stem
+				-- (not under a room: they'd poke up into it).
 				ellipsoid(ctx, "Node", Vector3.new(s.d0 * 1.3, s.d0 * 0.45, s.d0 * 1.3), upFrame(b, dir), Palette.shade(color, -0.15), ctx.M.joint)
 				local sr = ctx.rng(977, s.vid)
 				local saz = sr:NextNumber() * TAU
@@ -1426,7 +1536,8 @@ local function growSynth(ctx, start: CFrame)
 		else
 			cylinderBetween(ctx, "Stem", a, b, lerp(s.d0, s.d1, 0.5 / ctx.stemSegments), color, ctx.M.stem)
 		end
-		if s.kind ~= "R" then
+		-- (No node ball under a room or on its roof: it would bulge into it.)
+		if s.kind ~= "R" and not room and not s.under then
 			ball(ctx, "Node", s.d1 * 1.12, b, Palette.shade(color, 0.05), ctx.M.joint)
 		end
 		ctx.stemGroup = nil
@@ -1435,7 +1546,9 @@ local function growSynth(ctx, start: CFrame)
 	for _, lf in L.leaves do
 		local pos = at(lf.pos)
 		local lcf = look(pos, pos + along(lf.dir)) * CFrame.new(0, 0, -lf.stemD * 0.4)
-		buildLeaf(ctx, lcf, lf.len, lf.maturity, lf.nodeT, false, lf.vid)
+		-- Leaves set into a room's shell start at its surface (sessile); a
+		-- grammar leaflet keeps its own short stalk, as before.
+		buildLeaf(ctx, lcf, lf.len, lf.maturity, lf.nodeT, lf.sessile and lf.kind == "L", lf.vid)
 	end
 
 	for _, f in L.flowers do
@@ -1495,13 +1608,29 @@ local function run(ctx, baseCF: CFrame)
 
 	-- The main stem (building plants are never rosettes).
 	local N, internode, thick, salt = mainStem(g, building)
-	local rooms = if building then Habitat.plan(g, N, ctx.rng(5153, 0), ctx.maxRooms) else nil
+	-- A building plant whose rooms go on any stem grows from the shape
+	-- grammar, which places its rooms (PlantSynth.roomPlan); laid out once
+	-- here, as the lift needs it. Every other building plant plans its rooms
+	-- up the classic main stem, exactly as before.
+	local spread = nil
+	if building and Genome.roomsAnywhere(ctx.genome) then
+		local plan = PlantSynth.roomPlan(ctx.genome, ctx.seed, ctx.examples, ctx.maxRooms, ctx.breathe)
+		if plan then
+			spread = PlantSynth.layout(ctx.genome, p, ctx.seed, ctx.examples, { rooms = plan.rooms, pruned = plan.pruned, swell = ctx.habitatSwell })
+		end
+	end
+	local rooms = if building and not spread then Habitat.plan(g, N, ctx.rng(5153, 0), ctx.maxRooms) else nil
 
 	-- On a slope, a building plant is lifted until all its rooms clear the
 	-- land. The lifted stretch doesn't sway (FlexBase): a ground hall stands
 	-- on a foundation (Habitat.build); otherwise the stem simply carries on
 	-- down into the soil, and can be climbed from the ground.
-	local lift, hall = profileGeometry(ctx, "PlantTerrain", liftFor, ctx, baseCF, rooms, N, internode, thick)
+	local lift, hall
+	if spread then
+		lift, hall = profileGeometry(ctx, "PlantTerrain", liftForLayout, ctx, baseCF, spread)
+	else
+		lift, hall = profileGeometry(ctx, "PlantTerrain", liftFor, ctx, baseCF, rooms, N, internode, thick)
+	end
 	ctx.groundLift = lift
 	if ctx.liftOnly then
 		return
@@ -1547,6 +1676,10 @@ local function run(ctx, baseCF: CFrame)
 		end
 	end
 
+	if spread then
+		growSynth(ctx, start, spread)
+		return
+	end
 	if ctx.synth and not building then
 		-- Grown from the shape grammar instead (building plants keep the
 		-- classic stem their rooms are planned on).

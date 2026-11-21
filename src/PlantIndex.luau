@@ -183,6 +183,8 @@ function PlantIndex.wild(seed: number, biome: string?): Genome.Genome
 	if biome == "Ember" then
 		Genome.ignite(g, (seed * 13 + 4177) % 2147483647)
 	end
+	-- Wild building plants grow their rooms on any stem (and pass it on).
+	Genome.spreadRooms(g, (seed * 17 + 6151) % 2147483647)
 	return g
 end
 

@@ -14,6 +14,16 @@
 	  Derive   the adult skeleton, derived once per genome
 	  Layout   where everything is at a growth progress (no parts)
 	  Organs   leaf and petal outlines for the close-up build
+	  Rooms    where a building plant's rooms go, on any of its stems
+
+	Every plant also draws its own stature (Derive), so plants of one kind
+	finish at different heights.
+
+	Building plants (rooms) whose genome says so (Genome.roomsAnywhere) grow
+	from the grammar too, whatever the generator, with rooms on the main
+	stem and its side shoots (PlantSynth.roomPlan). Every other building
+	plant, and every one saved before the roomStems gene existed, keeps the
+	classic stem with its rooms stacked up the middle, exactly as before.
 
 	PlantBuilder uses it when configured:
 
@@ -36,6 +46,7 @@ local Rules = require(script.Rules)
 local Derive = require(script.Derive)
 local Layout = require(script.Layout)
 local Organs = require(script.Organs)
+local Rooms = require(script.Rooms)
 
 local PlantSynth = {}
 
@@ -44,6 +55,7 @@ PlantSynth.Rules = Rules
 PlantSynth.Derive = Derive
 PlantSynth.Layout = Layout
 PlantSynth.Organs = Organs
+PlantSynth.Rooms = Rooms
 
 -- Derived skeletons, kept per genome (and example choice). A plant is
 -- derived once and rebuilt from the same skeleton at every growth stage
@@ -75,9 +87,64 @@ function PlantSynth.graph(genome: Genome.Genome, seed: number?, examples: { stri
 end
 
 -- Where every stem piece, leaf and flower is at this progress (see Layout).
-function PlantSynth.layout(genome: Genome.Genome, progress: number, seed: number?, examples: { string }?): Layout.Result
+-- plan: a building plant's rooms (PlantSynth.roomPlan).
+function PlantSynth.layout(genome: Genome.Genome, progress: number, seed: number?, examples: { string }?, plan: Layout.Plan?): Layout.Result
 	local G = PlantSynth.graph(genome, seed, examples)
-	return Layout.layout(G, genome.genes, progress)
+	return Layout.layout(G, genome.genes, progress, plan)
+end
+
+--[[
+	The rooms of a building plant that grows them on any stem, as a
+	Layout.Plan without its swell: rooms = node vid -> room number (0 the
+	ground hall), pruned = side shoots the rooms took the place of. nil if
+	this plant keeps the classic stem (not such a plant, or its stems have
+	no room for a full home).
+
+	maxRooms: a home's room count, ground hall included (it always has one);
+	nil for a wild building plant, which has its own count (Rooms.countFor).
+	Homes are planned for Rooms.MAX rooms and use the first maxRooms, so a
+	home that grows a room keeps the others where they were.
+]]
+function PlantSynth.roomPlan(genome: Genome.Genome, seed: number?, examples: { string }?, maxRooms: number?, breathe: (() -> ())?): Layout.Plan?
+	if not (Genome.hasHabitat(genome) and Genome.roomsAnywhere(genome)) then
+		return nil
+	end
+	local g = genome.genes
+	local G = PlantSynth.graph(genome, seed, examples)
+	local main = G.axes[1]
+	if main.type ~= "S" then
+		return nil
+	end
+	local hall = maxRooms ~= nil or Rooms.hallFor(g, G.seed)
+	local found = Rooms.sites(G, g, hall, Rooms.lean(g), breathe)
+	local sites = found.sites
+	local want: number
+	if maxRooms then
+		if #sites < Rooms.MAX - 1 then
+			return nil -- not room for a whole home: the classic stem has
+		end
+		want = math.clamp(math.floor(maxRooms), 1, Rooms.MAX) - 1
+	else
+		if #sites == 0 then
+			return nil
+		end
+		want = Rooms.countFor(g, G.seed)
+	end
+	local map = {}
+	if hall then
+		map[main.nodes[1].vid] = 0
+	end
+	local count = math.min(want, #sites)
+	for k = 1, count do
+		map[sites[k]] = k
+	end
+	local pruned = {}
+	for vid, k in found.pruned do
+		if k <= count then
+			pruned[vid] = true
+		end
+	end
+	return { rooms = map, pruned = pruned }
 end
 
 --[[

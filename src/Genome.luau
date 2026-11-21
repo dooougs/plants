@@ -68,6 +68,11 @@ Genome.GENES = {
 	"donor", -- away from 0.4..0.6: the body plan mixes in a second example plant (a hybrid shape)
 	"leafEdge", -- low: toothed and cut leaves, high: lobed (close up, with features.organs)
 	"petalEdge", -- low: fringed and notched petals, high: pointed and frilly
+	-- Building plants (habitat). 0 (every genome saved before it existed) keeps
+	-- the classic rooms, stacked up the main stem; at ROOMS_ANYWHERE or more
+	-- the shape grammar places rooms on any of the plant's stems (PlantSynth.Rooms),
+	-- higher values leaning further out onto the side shoots.
+	"roomStems",
 }
 
 -- Genome.hash reads only the genes up to here, so genes appended after
@@ -75,7 +80,7 @@ Genome.GENES = {
 Genome.HASHED_GENES = 35
 
 -- What a gene is when a genome string is too old to have it (0.5 otherwise).
-Genome.DEFAULTS = { fire = 0, glow = 0 } :: { [string]: number }
+Genome.DEFAULTS = { fire = 0, glow = 0, roomStems = 0 } :: { [string]: number }
 
 -- Genes kept at a few fixed values instead of drifting (see finish).
 local function snapGene(name: string, value: number): number
@@ -113,6 +118,8 @@ Genome.LINKAGE = {
 	-- late: rolled after the mutation pass in splice, so hybrids of the
 	-- groups above come out exactly as they did before this group existed.
 	{ name = "grammar", label = "Shape grammar", genes = { "donor", "leafEdge", "petalEdge" }, late = true },
+	-- Rolled after the grammar group, so that group's hybrids are unchanged too.
+	{ name = "rooms", label = "Room layout", genes = { "roomStems" }, late = true },
 } :: { LinkageGroup }
 
 --[[
@@ -192,6 +199,9 @@ function Genome.fromSeed(seed: number, archetype: string?): Genome
 	-- Most wild plants have a pure body plan; about 1 in 6 is a hybrid shape.
 	local d = genes.donor
 	genes.donor = if d < 0.08 then d / 0.08 * 0.4 elseif d > 0.92 then 0.6 + (d - 0.92) / 0.08 * 0.4 else 0.5
+	-- Classic rooms unless asked for (Genome.spreadRooms): games build fixed
+	-- buildings from fromSeed, and their rooms must stay where they are.
+	genes.roomStems = 0
 	return { v = Genome.VERSION, gen = 0, genes = finish(genes) }
 end
 
@@ -357,6 +367,25 @@ local Host = require(script.Parent.Host)
 -- Plants.configure({ features = { rooms = false } }) turns every room off.
 function Genome.hasHabitat(g: Genome): boolean
 	return Host.features.rooms ~= false and g.genes.habitat >= Genome.HABITAT_THRESHOLD
+end
+
+-- Building plants with roomStems at or over this have their rooms placed on
+-- any stem by the shape grammar; below it, rooms stack up the main stem as
+-- they always have (and every genome saved before the gene existed reads 0).
+Genome.ROOMS_ANYWHERE = 0.2
+
+function Genome.roomsAnywhere(g: Genome): boolean
+	return (g.genes.roomStems or 0) >= Genome.ROOMS_ANYWHERE
+end
+
+-- Turns on rooms-on-any-stem for a genome, in place, with a seeded lean
+-- (how far out onto the side shoots its rooms tend to go). Keeps a value
+-- that is already on.
+function Genome.spreadRooms(g: Genome, seed: number?): Genome
+	if not Genome.roomsAnywhere(g) then
+		g.genes.roomStems = quantize(rngFrom(seed):NextNumber(0.3, 1))
+	end
+	return g
 end
 
 -- How brightly a plant's flowers glow: 0 for an ordinary plant, else from
