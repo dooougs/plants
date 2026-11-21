@@ -269,6 +269,57 @@ function FurnitureRules.hash(r: string): number
 	return h % 9999999 + 1
 end
 
+---------------------------------------------------------------- group styles
+
+-- A town (or any group of buildings) picks one decor style from its seed,
+-- and its own signature within it: the legs, outline and colourway every
+-- piece shares (the parts people match by, Liu et al.). Each piece then
+-- grows its own back, trim, weight and size from its own seed, within the
+-- style, so no two are alike but they all belong together.
+export type Group = { style: number, legs: number, shape: number, colour: number }
+
+local function lcg(seed: number): (number, number) -> number
+	local s = math.floor(math.abs(seed)) % 2147483646 + 1
+	return function(lo: number, hi: number): number
+		s = (s * 16807) % 2147483647
+		return lo + s % (hi - lo + 1)
+	end
+end
+
+function FurnitureRules.groupStyle(seed: number): Group
+	local next = lcg(seed * 7 + 13)
+	next(1, 2) -- stir
+	local style = next(1, FurnitureRules.MIX - 1)
+	local s = FurnitureRules.STYLES[style]
+	return {
+		style = style,
+		legs = s.allow.legs[next(1, #s.allow.legs)],
+		shape = s.allow.shape[next(1, #s.allow.shape)],
+		colour = next(2, 3), -- one of the style's own colourways
+	}
+end
+
+-- The recipe of one piece of kind `id` in group style `g`, from its seed.
+function FurnitureRules.groupRecipe(g: Group, id: string, seed: number): string
+	local s = FurnitureRules.STYLES[g.style]
+	local next = lcg(seed * 31 + 7)
+	next(1, 2)
+	local d: any = { style = g.style, legs = g.legs, shape = g.shape, colour = g.colour }
+	for _, gene in { "back", "trim", "weight", "size" } do
+		local allow = s.allow[gene]
+		d[gene] = allow[next(1, #allow)]
+	end
+	return FurnitureRules.encode(d :: Design)
+end
+
+-- The grown pieces a styled room swaps for designed ones.
+FurnitureRules.STYLED = {
+	stool = "dstool", bench = "dbench", armchair = "dchair", table = "dtable", roundTable = "dtable",
+	shelf = "dshelf", lantern = "dlamp", bed = "dbed",
+}
+-- What sits round a styled table.
+FurnitureRules.STYLED_SEAT = "dchair"
+
 ---------------------------------------------------------------- names
 
 function FurnitureRules.isKind(id: any): boolean

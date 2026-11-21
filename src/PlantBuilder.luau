@@ -1206,6 +1206,7 @@ local function makeContext(genome, progress: number, options, model: Model?)
 		visualOnly = options.visualOnly == true,
 		building = options.building, -- the anchor's Building kind, if any (Furniture picks room purposes by it)
 		roomUses = Furniture.parseUses(options.roomUses), -- "0=bedroom,1=kitchen": rooms whose owner picked a purpose
+		decorSeed = if type(options.decorSeed) == "number" then options.decorSeed else nil, -- a town's decor style (FurnitureRules.groupStyle): grown rooms of non-homes grow designed pieces in it
 		maxRooms = if type(options.maxRooms) == "number" then math.clamp(math.floor(options.maxRooms), 1, 5) else nil, -- a home's room count (Shared.Housing.Homes)
 		roomFurniture = if type(options.roomFurniture) == "table" then options.roomFurniture else nil, -- rooms their owner arranged: room -> pieces (Shared.Housing.RoomFurniture)
 		flowers = {},
