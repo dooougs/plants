@@ -34,8 +34,17 @@
 	Furniture seeds you hold are counts by kind in your inventory
 	(inv.furniture), outside the seed bag.
 
+	Designed pieces (Shared.Plants.FurnitureRules: chairs, tables, beds...
+	grown from a recipe of rule choices) add their recipe as an eighth field:
+	  "id:x:z:a:s:seed:key:recipe"
+	Pieces without one (every piece grown or planted before designs) keep
+	the seven fields and grow exactly as they always did. A designed seed you
+	hold is the item "kind.recipe" (RoomFurniture.item) in inv.furniture.
+
 	Plain Lua with light types, shared by server and client.
 ]]
+
+local FurnitureRules = require(script.Parent.FurnitureRules)
 
 local RoomFurniture = {}
 
@@ -50,8 +59,9 @@ RoomFurniture.SCALE_MIN = 0.5
 RoomFurniture.SCALE_MAX = 1.3
 RoomFurniture.SEED_MAX = 9999999
 RoomFurniture.TURN = 45 -- degrees per turn in the decorate tools
+RoomFurniture.MAX_DESIGNS = 40 -- different designed pieces you can hold at once
 
-export type Piece = { id: string, x: number, z: number, a: number, s: number, seed: number, key: string }
+export type Piece = { id: string, x: number, z: number, a: number, s: number, seed: number, key: string, r: string? }
 
 -- Every piece kind: its name and icon (for the bag, the market and the
 -- decorate tools), and its price in tokens if the market sells its seed.
@@ -96,11 +106,16 @@ RoomFurniture.KINDS = {
 	gameTable = { name = "Game Table", icon = "♟️", price = 40 },
 	fireplace = { name = "Pebble Fireplace", icon = "🔥", price = 45 },
 }
+-- Designed kinds (FurnitureRules): sold in the market's designer, not the list.
+for id, k in FurnitureRules.KINDS do
+	RoomFurniture.KINDS[id] = { name = k.name, icon = k.icon, price = k.price, design = true }
+end
+RoomFurniture.DESIGNS = FurnitureRules.ORDER
 
 -- What the market sells, cheapest first.
 RoomFurniture.SHOP = {} :: { string }
 for id, k in RoomFurniture.KINDS do
-	if k.price then
+	if k.price and not k.design then
 		table.insert(RoomFurniture.SHOP, id)
 	end
 end
@@ -116,14 +131,69 @@ function RoomFurniture.isKind(id: any): boolean
 	return type(id) == "string" and RoomFurniture.KINDS[id] ~= nil
 end
 
+---------------------------------------------------------------- items
+
+-- An item is a furniture seed you can hold: a kind ("bed"), or a designed
+-- kind with its recipe ("dchair.a02252211").
+function RoomFurniture.item(id: string, recipe: string?): string
+	if recipe and FurnitureRules.isKind(id) then
+		return id .. "." .. recipe
+	end
+	return id
+end
+
+-- "dchair.a0225..." -> "dchair", "a0225..."; "bed" -> "bed", nil.
+function RoomFurniture.splitItem(item: string): (string, string?)
+	local id, recipe = string.match(item, "^(%w+)%.(%w+)$")
+	if id then
+		return id, recipe
+	end
+	return item, nil
+end
+
+-- Is `item` one you could hold: a known kind, with a valid recipe if any
+-- (only designed kinds take one).
+function RoomFurniture.isItem(item: any): boolean
+	if type(item) ~= "string" or #item > 40 then
+		return false
+	end
+	local id, recipe = RoomFurniture.splitItem(item)
+	if not RoomFurniture.isKind(id) then
+		return false
+	end
+	if recipe then
+		return FurnitureRules.isKind(id) and FurnitureRules.valid(recipe)
+	end
+	return true
+end
+
+-- A piece's item (what digging it up gives back).
+function RoomFurniture.itemOf(p: Piece): string
+	return RoomFurniture.item(p.id, p.r)
+end
+
 function RoomFurniture.name(id: string): string
-	local k = RoomFurniture.KINDS[id]
-	return if k then k.name else id
+	local kind, recipe = RoomFurniture.splitItem(id)
+	if FurnitureRules.isKind(kind) then
+		return FurnitureRules.name(kind, recipe)
+	end
+	local k = RoomFurniture.KINDS[kind]
+	return if k then k.name else kind
 end
 
 function RoomFurniture.icon(id: string): string
-	local k = RoomFurniture.KINDS[id]
+	local kind = RoomFurniture.splitItem(id)
+	local k = RoomFurniture.KINDS[kind]
 	return if k then k.icon else "🪑"
+end
+
+-- The price of an item in the market, or nil if it isn't sold.
+function RoomFurniture.price(item: string): number?
+	if not RoomFurniture.isItem(item) then
+		return nil
+	end
+	local k = RoomFurniture.KINDS[(RoomFurniture.splitItem(item))]
+	return k and k.price
 end
 
 function RoomFurniture.field(room: number): string
@@ -167,6 +237,7 @@ function RoomFurniture.clean(p: Piece): Piece
 		s = math.clamp(round(p.s * 100), round(RoomFurniture.SCALE_MIN * 100), round(RoomFurniture.SCALE_MAX * 100)) / 100,
 		seed = math.clamp(round(p.seed), 1, RoomFurniture.SEED_MAX),
 		key = p.key,
+		r = if p.r and FurnitureRules.isKind(p.id) and FurnitureRules.valid(p.r) then p.r else nil,
 	}
 end
 
@@ -175,6 +246,9 @@ function RoomFurniture.encode(pieces: { Piece }): string
 	for i, p in pieces do
 		local c = RoomFurniture.clean(p)
 		out[i] = string.format("%s:%d:%d:%d:%d:%s:%s", c.id, round(c.x * 10), round(c.z * 10), c.a, round(c.s * 100), base36(c.seed), c.key)
+		if c.r then
+			out[i] ..= ":" .. c.r
+		end
 	end
 	return table.concat(out, ";")
 end
@@ -188,7 +262,10 @@ function RoomFurniture.decode(s: any): { Piece }?
 	local out = {}
 	local seen = {}
 	for entry in string.gmatch(s, "[^;]+") do
-		local id, x, z, a, sc, seed, key = string.match(entry, "^(%w+):(%-?%d+):(%-?%d+):(%d+):(%d+):(%w+):(%w+)$")
+		local id, x, z, a, sc, seed, key, r = string.match(entry, "^(%w+):(%-?%d+):(%-?%d+):(%d+):(%d+):(%w+):(%w+):(%w+)$")
+		if not id then
+			id, x, z, a, sc, seed, key = string.match(entry, "^(%w+):(%-?%d+):(%-?%d+):(%d+):(%d+):(%w+):(%w+)$")
+		end
 		if id and RoomFurniture.isKind(id) and validKey(key) and not seen[key] and #out < RoomFurniture.MAX_PIECES then
 			seen[key] = true
 			table.insert(out, RoomFurniture.clean({
@@ -199,6 +276,7 @@ function RoomFurniture.decode(s: any): { Piece }?
 				s = (tonumber(sc) :: number) / 100,
 				seed = tonumber(seed, 36) or 1,
 				key = key,
+				r = r,
 			}))
 		end
 	end
@@ -280,19 +358,35 @@ end
 
 ---------------------------------------------------------------- held seeds
 
--- inv.furniture: kind -> how many furniture seeds you hold.
+-- inv.furniture: item (a kind, or "kind.recipe") -> how many furniture
+-- seeds you hold.
 function RoomFurniture.held(inv: any, id: string): number
 	local f = type(inv) == "table" and inv.furniture
 	local n = type(f) == "table" and f[id]
 	return if type(n) == "number" then n else 0
 end
 
+-- How many different designed items you hold.
+function RoomFurniture.designsHeld(inv: any): number
+	local n = 0
+	local f = type(inv) == "table" and inv.furniture
+	for item in (if type(f) == "table" then f else {}) do
+		if string.find(item, ".", 1, true) then
+			n += 1
+		end
+	end
+	return n
+end
+
 function RoomFurniture.give(inv: any, id: string, n: number?): boolean
-	if not RoomFurniture.isKind(id) then
+	if not RoomFurniture.isItem(id) then
 		return false
 	end
 	inv.furniture = inv.furniture or {}
 	local have = RoomFurniture.held(inv, id)
+	if have == 0 and string.find(id, ".", 1, true) and RoomFurniture.designsHeld(inv) >= RoomFurniture.MAX_DESIGNS then
+		return false
+	end
 	local add = n or 1
 	if have + add > RoomFurniture.MAX_HELD then
 		return false
@@ -315,7 +409,7 @@ function RoomFurniture.readHeld(data: any): { [string]: number }
 	local out = {}
 	if type(data) == "table" then
 		for id, n in data do
-			if RoomFurniture.isKind(id) and type(n) == "number" and n >= 1 then
+			if RoomFurniture.isItem(id) and type(n) == "number" and n >= 1 then
 				out[id] = math.min(math.floor(n), RoomFurniture.MAX_HELD)
 			end
 		end
