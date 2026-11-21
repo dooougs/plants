@@ -66,7 +66,7 @@ end
 ---------------------------------------------------------------- parts
 
 -- Points round the edge of an outline (for trims), at height y.
-local function edgePoints(shape: number, w: number, d: number, y: number, spacing: number): { Vector3 }
+local function edgePointsAt(shape: number, w: number, d: number, y: number, spacing: number): { Vector3 }
 	local out = {}
 	if shape == 1 or shape == 6 then -- square, hex: round the rectangle
 		local per = 2 * (w + d)
@@ -306,9 +306,20 @@ end
 
 -- Ornament: round the edge of a top (outline shape, w x d at height y) and
 -- on the legs (spots, from y0 to y1). `glowOk` lets Beads glow.
-local function trim(B, P, g: number, shape: number, w: number, d: number, y: number, spots: { Vector3 }?, legG: number?, y0: number?, y1: number?)
+-- `oz` moves the outline back (+Z) for a top that isn't centred; `ring`
+-- keeps Dots to a ring round the edge (a top with things standing on it).
+local function trim(B, P, g: number, shape: number, w: number, d: number, y: number, spots: { Vector3 }?, legG: number?, y0: number?, y1: number?, oz: number?, ring: boolean?)
 	if g == 1 then
 		return
+	end
+	local function edgePoints(sh: number, ww: number, dd: number, yy: number, spacing: number): { Vector3 }
+		local pts = edgePointsAt(sh, ww, dd, yy, spacing)
+		if oz and oz ~= 0 then
+			for i, q in pts do
+				pts[i] = q + Vector3.new(0, 0, oz)
+			end
+		end
+		return pts
 	end
 	if g == 2 then
 		-- a skirt of little petals under the edge
@@ -318,13 +329,19 @@ local function trim(B, P, g: number, shape: number, w: number, d: number, y: num
 		end
 	elseif g == 3 then
 		-- dots on the top, just inside its edge (a mushroom cap's spots)
+		if ring then
+			for _, p in edgePoints(shape, w * 0.98, d * 0.98, y, 0.7) do
+				B.ball("TrimDot", 0.22, p.X, p.Y, p.Z, P.trim, SMOOTH)
+			end
+			return
+		end
 		local pts = edgePoints(shape, w * 0.62, d * 0.62, y + 0.02, 0.9)
 		for i, p in pts do
 			if i % 2 == 1 or #pts <= 6 then
 				B.egg("TrimDot", 0.34, 0.08, 0.34, p.X, p.Y, p.Z, P.trim, SMOOTH)
 			end
 		end
-		B.egg("TrimDot", 0.42, 0.08, 0.42, 0, y + 0.02, 0, P.trim, SMOOTH)
+		B.egg("TrimDot", 0.42, 0.08, 0.42, 0, y + 0.02, oz or 0, P.trim, SMOOTH)
 	elseif g == 4 then
 		-- a vine wound round the legs, with leaves
 		if spots and y0 and y1 and legG ~= 6 then
@@ -382,6 +399,8 @@ FurnitureGrammar.PLACE = {
 	dbed = { place = "wall", walls = { back = 1, left = 1, right = 1, front = 0.3 }, corner = 0.9, along = true, access = 1.6, sleeps = true },
 	dlamp = { place = "wall", corner = 1, access = 0 },
 	dshelf = { place = "wall", corner = 0.3, access = 1.6 },
+	dstall = { place = "wall", corner = 0.2, access = 2.5 },
+	dcounter = { place = "wall", corner = 0.3, access = 2 },
 }
 
 KINDS.dchair = {
@@ -636,6 +655,261 @@ KINDS.dshelf = {
 		trim(B, P, d.trim, d.shape, W + 0.3, D + 0.2, H + T / 2)
 	end,
 }
+
+-- A market stall: Legs + Table(top) + Backboard(back) + Posts + Awning(shape) + Trim.
+-- The stall's front (-Z) is where you shop; the awning leans out over it.
+KINDS.dstall = {
+	params = function(d, s, k)
+		local W = if d.size == 1 then 4.4 elseif d.size == 2 then 5 else 5.6
+		local D, topY = 2.6, 2.6
+		return { w = W + 0.4, d = D + 0.8, h = 7.6, W = W, D = D, topY = topY, awningY = 6.6 }
+	end,
+	build = function(B, P, d, p, k, n)
+		local W, D, topY = p.W, p.D, p.topY
+		local t = 0.22 * k + 0.2
+		local dia = 0.32 * k
+		local spots = legSpots(1, W, D, dia * 0.7 + 0.2, 4)
+		legs(B, P, if d.legs == 6 then 1 else d.legs, spots, 0, topY - t, dia, D)
+		top(B, "StallTable", d.shape, W, D, t, topY - t / 2, P.top, P.topMat)
+		-- two posts at the back hold the awning
+		local postZ = D / 2 - 0.15
+		local ay = p.awningY
+		for _, sx in { -1, 1 } do
+			B.cyl("StallPost", dia * 0.9, sx * (W / 2 - 0.15), topY, ay + 0.2, postZ, P.frame, P.frameMat)
+		end
+		-- a backboard between them, in the back rule (none: open)
+		back(B, P, d.back, W - 0.4, math.min(2.4, ay - topY - 1.2), topY + 0.2, postZ + 0.05, dia * 0.8, true)
+		-- the awning: striped slats leaning out, edged in the shape rule
+		local slats = 6
+		local sw = (W + 0.4) / slats
+		local tilt = CFrame.Angles(math.rad(-18), 0, 0)
+		local lean = 3.2
+		local fz = postZ - lean * math.cos(math.rad(18)) + 0.15
+		local fy = ay - lean * math.sin(math.rad(18))
+		for i = 0, slats - 1 do
+			local x = -(W + 0.4) / 2 + sw * (i + 0.5)
+			local col = if i % 2 == 0 then P.cloth else P.trim
+			B.box("StallAwning", sw, 0.22, lean, x, ay - lean / 2 * math.sin(math.rad(18)), postZ - lean / 2 * math.cos(math.rad(18)) + 0.15, col, FABRIC, false, tilt)
+			-- the valance hanging off the front edge
+			local vx, vy, vz = x, fy - 0.2, fz
+			if d.shape == 1 then
+				B.box("StallValance", sw, 0.5, 0.1, vx, vy, vz, col, FABRIC)
+			elseif d.shape == 2 then
+				B.slab("StallValance", sw - 0.04, 0.1, 0.6, vx, vy, vz, col, FABRIC, false, 0.25, CFrame.Angles(math.pi / 2, 0, 0))
+			elseif d.shape == 3 then
+				B.logZ("StallValance", 0.1, sw * 0.98, vx, vy, vz, col, FABRIC)
+			elseif d.shape == 4 then
+				B.egg("StallValance", sw * 0.9, 0.9, 0.08, vx, vy - 0.1, vz, P.leaf, M.leaf)
+			elseif d.shape == 5 then
+				B.egg("StallValance", sw * 0.95, 0.75, 0.1, vx, vy - 0.05, vz, if i % 2 == 0 then P.trim else P.cloth, M.petal)
+			else
+				B.box("StallValance", sw * 0.6, 0.55, 0.1, vx, vy, vz, col, FABRIC, false, CFrame.Angles(0, 0, math.pi / 4))
+			end
+		end
+		B.logX("StallRail", W + 0.4, 0.14, 0, fy, fz, P.frame, P.frameMat)
+		trim(B, P, d.trim, d.shape, W, D, topY - t / 2, spots, d.legs, 0, topY - t, nil, true)
+		return { topY = topY }
+	end,
+}
+
+-- A counter: Feet(legs) + Carcass + Front(back rule, facing you) + Top(shape) + Trim.
+-- The customer's side is the front (-Z). Small, medium or large by its size.
+KINDS.dcounter = {
+	params = function(d, s, k)
+		local W = if d.size == 1 then 5.6 elseif d.size == 2 then 8 else 9.6
+		local D, topY = 2.5, 3.2
+		return { w = W + 0.6, d = D + 0.6, h = topY + 0.3, W = W, D = D, topY = topY }
+	end,
+	build = function(B, P, d, p, k, n)
+		local W, D, topY = p.W, p.D, p.topY
+		local t = 0.2 * k + 0.2
+		local foot = if d.legs == 1 then 0.25 else 0.45
+		-- feet: a plinth for posts and pedestals, little legs of the rule otherwise
+		if d.legs == 1 or d.legs == 6 then
+			B.box("CounterPlinth", W - 0.3, foot, D - 0.3, 0, foot / 2, 0, shade(P.frame, -0.25), P.frameMat, true)
+		else
+			legs(B, P, d.legs, legSpots(1, W, D, 0.35, if W > 7 then 6 else 4), 0, foot, 0.4 * k, D)
+		end
+		local bodyH = topY - t - foot
+		B.box("CounterBody", W, bodyH, D, 0, foot + bodyH / 2, 0, P.frame, P.frameMat, true)
+		B.box("CounterKick", W - 0.2, 0.2, 0.08, 0, foot + 0.12, -D / 2 - 0.03, shade(P.frame, -0.2), P.frameMat)
+		-- the front panels, one per bay, and the front's ornament in the back rule
+		local bays = math.max(2, math.floor(W / 2.6 + 0.5))
+		local bw = W / bays
+		for i = 0, bays - 1 do
+			local x = -W / 2 + bw * (i + 0.5)
+			B.box("CounterPanel", bw - 0.35, bodyH - 0.5, 0.06, x, foot + bodyH / 2, -D / 2 - 0.02, shade(P.top, -0.08), P.topMat)
+		end
+		back(B, P, d.back, W - 0.6, bodyH - 0.9, foot + 0.3, -D / 2 - 0.12, 0.18 * k, true)
+		local from = #B.parts
+		top(B, "CounterTop", d.shape, W + 0.6, D + 0.5, t, topY - t / 2, P.top, P.topMat)
+		local topPart = B.parts[from + 1]
+		trim(B, P, d.trim, d.shape, W + 0.6, D + 0.5, topY - t / 2, nil, nil, nil, nil, nil, true)
+		return { topY = topY, top = topPart }
+	end,
+}
+
+---------------------------------------------------------------- dressing grown pieces
+
+--[[
+	Every other grown piece (a chest, a cupboard, a barrel, a rug...) keeps
+	its own body, which is what makes it work (a chest's hinged lid, a
+	cupboard's doors, a tank's tap), and is dressed by the same grammar in a
+	style:
+
+	  Piece -> Body(kind, in the style's colours) + Trim(round its rim) + Crest(back rule)
+
+	The body's wood, wicker and clay take the style's frame and top colours
+	(lighter woods the top colour, darker the frame), its cloth and petals the
+	style's cloth and trim, its glow the style's glow; flames, water, soil,
+	honey and the like keep their own colours. The trim runs round the
+	piece's rim, the crest (back rule) stands on top of tall wall pieces, and
+	weight and size thicken and raise them. So a Mushroom Cottage chest, its
+	cupboard and its barrels go with its chairs and tables.
+
+	DRESS[kind](p) -> { rim = { y, w, d, round?, z? }?, crest = { y, w, z }? }
+	in the piece's own frame, from its procedural sizes p.
+]]
+
+local DRESS = {}
+FurnitureGrammar.DRESS = DRESS
+DRESS.bunk = function(p) return { rim = { p.top + 0.3, p.W, p.L } } end
+DRESS.chest = function(p) return { rim = { p.H, p.W, p.D } } end
+DRESS.cupboard = function(p) return { rim = { p.H, p.W, p.D }, crest = { p.h - 0.05, p.W * 0.8, p.D / 2 - 0.2 } } end
+DRESS.sideboard = function(p) return { rim = { p.H, p.W, p.D } } end
+DRESS.rug = function(p) return { rim = { 0.12, 2 * p.R, 2 * p.R * p.k, true } } end
+DRESS.planter = function(p) return { rim = { p.H, p.D, p.D, true } } end
+DRESS.windowBox = function(p) return { rim = { 1.66, p.W + 0.1, 1.3 } } end
+DRESS.honeycomb = function(p) return { rim = { 2.11, p.W + 0.2, 1.9 }, crest = { 5.3, p.W * 0.7, 0.7 } } end
+DRESS.stove = function(p) return { rim = { 0.45, p.W, p.W, true } } end
+DRESS.trough = function(p) return { rim = { 1.56, p.L, 1.4 } } end
+DRESS.desk = function(p) return { rim = { p.H, p.W, 1.7, false, 0.85 } } end
+DRESS.board = function(p) return { crest = { 4.4, p.W * 0.8, 0.1 } } end
+DRESS.tank = function(p) return { rim = { p.H + 0.12, p.D, p.D, true, 0.4 } } end
+DRESS.barrel = function(p) return { rim = { p.H, p.D * 0.88, p.D * 0.88, true } } end
+DRESS.basket = function(p) return { rim = { p.H, p.D, p.D, true } } end
+DRESS.compost = function(p) return { rim = { 2.2, p.W, p.W } } end
+DRESS.vat = function(p) return { rim = { 1.68, p.D + 0.06, p.D + 0.06, true } } end
+DRESS.stage = function(p) return { rim = { 0.8, p.W, p.D } } end
+DRESS.plinth = function(p) return { rim = { p.H, 1.5, 1.5 } } end
+DRESS.gameTable = function(p) return { rim = { 2.3, p.w, p.w } } end
+DRESS.fireplace = function(p) return { crest = { p.H, p.W * 0.7, 0.75 } } end
+DRESS.shelf = function(p) return { crest = { p.H, p.W * 0.8, 0.55 } } end
+
+-- Parts whose colour is what they are, not what they're made of.
+local KEEP = { "Flame", "Ember", "Fire", "Soil", "Water", "Dye", "Nectar", "Honey", "Gold", "Seed", "Fruit", "Glass", "Chalk", "Note", "Worm", "Square", "Paper", "Ink", "Key", "Knob", "Hoop", "Coal", "Soup" }
+local GLOWS = { "Glow", "Bulb", "Light", "Lamp" }
+-- Parts that take a style colour whatever colour they grew in.
+local ROLES = { StoolCap = "top", StoolDome = "top", StoolStalk = "frame", StoolFoot = "frame", StoolRing = "frame", StoolSpot = "trim" }
+
+local function named(n: string, words: { string }): boolean
+	for _, w in words do
+		if string.find(n, w, 1, true) then
+			return true
+		end
+	end
+	return false
+end
+
+-- Wood, wicker and clay: warm browns and oranges, not too pale or dark.
+local function woody(c: Color3): boolean
+	local h, s, v = c:ToHSV()
+	local deg = h * 360
+	return deg >= 8 and deg <= 50 and s >= 0.2 and s <= 0.92 and v >= 0.18 and v <= 0.92
+end
+
+-- The style's colour for one of the body's colours.
+local function tint(P, n: string, col: Color3, mat: Enum.Material?): (Color3, Enum.Material?)
+	if mat == M.habitatGlow then
+		if named(n, GLOWS) then
+			return col:Lerp(P.glow, 0.6), mat
+		end
+		return col, mat
+	end
+	-- a mushroom stool: its cap takes the top colour, its stalk the frame's
+	local role = ROLES[n]
+	if role then
+		local base = P[role]
+		local _, _, v = col:ToHSV()
+		return shade(base, math.clamp((v - 0.8) * 0.8, -0.3, 0.3)), if role == "top" then P.topMat else P.frameMat
+	end
+	if named(n, KEEP) or not woody(col) then
+		return col, mat
+	end
+	local _, _, v = col:ToHSV()
+	local light = v >= 0.66
+	local base = if light then P.top else P.frame
+	-- keep the body's own light and dark (a darker lid edge, a paler top)
+	local out = shade(base, math.clamp((v - (if light then 0.76 else 0.52)) * 1.3, -0.45, 0.45))
+	local m = mat
+	if mat == Enum.Material.Wood or mat == Enum.Material.WoodPlanks then
+		m = if light then P.topMat else P.frameMat
+	end
+	return out, m
+end
+
+-- A builder that grows everything in the style's colours.
+local function tinted(B, P)
+	local T = setmetatable({}, { __index = B })
+	for _, name in { "box", "wedge", "cyl", "logX", "logZ", "rod", "ball", "egg", "slab", "arch" } do
+		local f = B[name]
+		if f then
+			T[name] = function(n: string, ...)
+				local args = table.pack(...)
+				for i = 1, args.n do
+					if typeof(args[i]) == "Color3" then
+						local col, mat = tint(P, n, args[i], args[i + 1])
+						args[i] = col
+						if i + 1 <= args.n and typeof(args[i + 1]) == "EnumItem" then
+							args[i + 1] = mat
+						end
+						break
+					end
+				end
+				return f(n, table.unpack(args, 1, args.n))
+			end
+		end
+	end
+	T.light = function(part, color: Color3, ...)
+		local nm = part and part.Name or ""
+		if not named(nm, { "Flame", "Ember", "Fire" }) then
+			color = color:Lerp(P.glow, 0.5)
+		end
+		return B.light(part, color, ...)
+	end
+	return T
+end
+FurnitureGrammar.tinted = tinted
+
+-- The plant colours a dressed body grows in (its cloth, petals and leaves).
+local function styleColours(P, c: any)
+	return setmetatable({
+		stem = P.frame, leaf = P.leaf, petalBase = P.cloth, petalTip = P.trim, center = P.trim:Lerp(P.glow, 0.5),
+	}, { __index = c })
+end
+
+-- Grows grown piece `id` (its own `base` build) dressed in design `p.styled`.
+function FurnitureGrammar.dress(id: string, B, c: any, p: any, base: (any, any, any, any) -> any, rng: any): any
+	local d = p.styled
+	local P = FurnitureGrammar.palette(d, c)
+	local made = base(tinted(B, P), styleColours(P, c), p, rng)
+	local spec = DRESS[id]
+	local o = if spec then spec(p) else nil
+	if o then
+		local k = WEIGHT[d.weight]
+		local s = SIZE[d.size]
+		local rim = o.rim
+		if rim then
+			local shape = if rim[4] then 3 else 1
+			trim(B, P, d.trim, shape, rim[2], rim[3], rim[1], nil, nil, nil, nil, rim[5], true)
+		end
+		local crest = o.crest
+		if crest and d.back ~= 1 then
+			back(B, P, d.back, crest[2], 0.7 * s, crest[1], crest[3], 0.2 * k, true)
+		end
+	end
+	return made
+end
 
 FurnitureGrammar.KINDS = KINDS
 

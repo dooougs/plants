@@ -28,7 +28,7 @@ Procedural plants for Roblox, extracted from Plant World.
 
 ```toml
 [dependencies]
-Plants = "dooougs/plants@0.1.6"
+Plants = "dooougs/plants@0.1.7"
 ```
 
 ## Use
