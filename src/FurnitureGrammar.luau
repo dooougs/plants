@@ -775,7 +775,7 @@ local DRESS = {}
 FurnitureGrammar.DRESS = DRESS
 DRESS.bunk = function(p) return { rim = { p.top + 0.3, p.W, p.L } } end
 DRESS.chest = function(p) return { rim = { p.H, p.W, p.D } } end
-DRESS.cupboard = function(p) return { rim = { p.H, p.W, p.D }, crest = { p.h - 0.05, p.W * 0.8, p.D / 2 - 0.2 } } end
+DRESS.cupboard = function(p) return { rim = { p.H, p.W, p.D }, crest = { p.H + 0.25, p.W * 0.8, p.D / 2 - 0.2 } } end
 DRESS.sideboard = function(p) return { rim = { p.H, p.W, p.D } } end
 DRESS.rug = function(p) return { rim = { 0.12, 2 * p.R, 2 * p.R * p.k, true } } end
 DRESS.planter = function(p) return { rim = { p.H, p.D, p.D, true } } end
@@ -888,24 +888,75 @@ local function styleColours(P, c: any)
 	}, { __index = c })
 end
 
--- Grows grown piece `id` (its own `base` build) dressed in design `p.styled`.
+-- A builder that grows everything `lift` studs higher (a body on feet).
+local function lifted(B, lift: number)
+	local L = setmetatable({}, { __index = B })
+	local up = Vector3.new(0, lift, 0)
+	-- which argument (after the name) is a height, for each part
+	local Y = { box = { 5 }, wedge = { 5 }, egg = { 5 }, slab = { 5 }, arch = { 5 }, cyl = { 3, 4 }, logX = { 4 }, logZ = { 4 }, ball = { 3 } }
+	for name, slots in Y do
+		local f = B[name]
+		L[name] = function(n: string, ...)
+			local args = table.pack(...)
+			for _, i in slots do
+				if type(args[i]) == "number" then
+					args[i] += lift
+				end
+			end
+			return f(n, table.unpack(args, 1, args.n))
+		end
+	end
+	L.rod = function(n: string, a: Vector3, b: Vector3, ...)
+		return B.rod(n, a + up, b + up, ...)
+	end
+	return L
+end
+
+-- How high a dressed piece of kind `id` stands on its feet (0: none).
+function FurnitureGrammar.liftOf(id: string, d: FurnitureRules.Design?): number
+	local spec = FurnitureRules.DRESSED[id]
+	if not d or not spec or not spec.uses.legs then
+		return 0
+	end
+	return (if d.legs == 1 or d.legs == 6 then 0.25 else 0.4) * SIZE[d.size]
+end
+
+-- Grows grown piece `id` (its own `base` build) dressed in design `p.styled`
+-- (on feet `p.lift` high, see FurnitureGrammar.liftOf).
 function FurnitureGrammar.dress(id: string, B, c: any, p: any, base: (any, any, any, any) -> any, rng: any): any
 	local d = p.styled
 	local P = FurnitureGrammar.palette(d, c)
-	local made = base(tinted(B, P), styleColours(P, c), p, rng)
+	local lift = p.lift or 0
 	local spec = DRESS[id]
 	local o = if spec then spec(p) else nil
+	local body = if lift > 0 then lifted(B, lift) else B
+	local made = base(tinted(body, P), styleColours(P, c), p, rng)
 	if o then
 		local k = WEIGHT[d.weight]
 		local s = SIZE[d.size]
 		local rim = o.rim
+		if rim and lift > 0 then
+			-- feet: a plinth for posts and pedestals, little legs of the rule otherwise
+			local w, dd = rim[2], rim[3]
+			if d.legs == 1 or d.legs == 6 then
+				B.box("DressPlinth", w - 0.2, lift, dd - 0.2, 0, lift / 2, rim[5] or 0, shade(P.frame, -0.2), P.frameMat, true)
+			else
+				local spots = legSpots(1, w, dd, 0.3, 4)
+				if rim[5] then
+					for i, q in spots do
+						spots[i] = q + Vector3.new(0, 0, rim[5])
+					end
+				end
+				legs(B, P, d.legs, spots, 0, lift + 0.05, 0.32 * k, 0.6)
+			end
+		end
 		if rim then
 			local shape = if rim[4] then 3 else 1
-			trim(B, P, d.trim, shape, rim[2], rim[3], rim[1], nil, nil, nil, nil, rim[5], true)
+			trim(B, P, d.trim, shape, rim[2], rim[3], rim[1] + lift, nil, nil, nil, nil, rim[5], true)
 		end
 		local crest = o.crest
 		if crest and d.back ~= 1 then
-			back(B, P, d.back, crest[2], 0.7 * s, crest[1], crest[3], 0.2 * k, true)
+			back(B, P, d.back, crest[2], 0.7 * s, crest[1] + lift, crest[3], 0.2 * k, true)
 		end
 	end
 	return made

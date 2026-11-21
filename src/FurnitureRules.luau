@@ -41,6 +41,7 @@
 ]]
 
 local FurnitureRules = {}
+local DRESSED_PARTS: { [string]: string }
 
 FurnitureRules.VERSION = "a"
 
@@ -76,6 +77,44 @@ FurnitureRules.KINDS = {
 	dcounter = { name = "Counter", icon = "🛎️", uses = { legs = true, shape = true, back = true, trim = true, weight = true, size = true, colour = true }, civic = true },
 }
 FurnitureRules.ORDER = { "dchair", "dtable", "dstool", "dbench", "dbed", "dlamp", "dshelf" }
+
+-- Every other grown piece (Shared.Plants.Furniture) can be bought dressed in
+-- a style too (FurnitureGrammar.dress): its own body in the style's
+-- colours, with Trim round its rim, a Crest (back rule) on tall wall pieces
+-- and Feet (legs rule) under chests and cupboards; weight and size thicken
+-- and raise those. Which rules each one reads:
+local function dressed(rim: boolean, crest: boolean, feet: boolean)
+	local extra = rim or crest or feet
+	return { uses = { colour = true, trim = rim or nil, back = crest or nil, legs = feet or nil, weight = extra or nil, size = extra or nil } }
+end
+FurnitureRules.DRESSED = {
+	bed = dressed(false, false, false), bunk = dressed(true, false, false), stool = dressed(false, false, false),
+	table = dressed(false, false, false), roundTable = dressed(false, false, false), shelf = dressed(false, true, false),
+	chest = dressed(true, false, true), cupboard = dressed(true, true, true), sideboard = dressed(true, false, true),
+	rug = dressed(true, false, false), beanbag = dressed(false, false, false), armchair = dressed(false, false, false),
+	jars = dressed(false, false, false), planter = dressed(true, false, false), windowBox = dressed(true, false, false),
+	lantern = dressed(false, false, false), hammock = dressed(false, false, false), parcels = dressed(false, false, false),
+	honeycomb = dressed(true, true, true), stove = dressed(true, false, false), teacup = dressed(false, false, false),
+	mossbed = dressed(false, false, false), trough = dressed(true, false, false), telescope = dressed(false, false, false),
+	desk = dressed(true, false, false), board = dressed(false, true, false), tank = dressed(true, false, false),
+	barrel = dressed(true, false, false), basket = dressed(true, false, false), compost = dressed(true, false, true),
+	vat = dressed(true, false, false), stage = dressed(true, false, false), bench = dressed(false, false, false),
+	plinth = dressed(true, false, false), gameTable = dressed(true, false, false), fireplace = dressed(false, true, false),
+}
+
+-- Does kind `id` take a recipe (a designed kind, or a grown one dressed)?
+function FurnitureRules.takesRecipe(id: any): boolean
+	return type(id) == "string" and (FurnitureRules.KINDS[id] ~= nil or FurnitureRules.DRESSED[id] ~= nil)
+end
+
+-- The rules kind `id` reads (designed or dressed), or nil.
+function FurnitureRules.usesOf(id: string): { [string]: boolean }?
+	local k = FurnitureRules.KINDS[id] or FurnitureRules.DRESSED[id]
+	return k and k.uses
+end
+
+-- What a dressed piece's rules grow (FurnitureRules.DRESSED).
+DRESSED_PARTS = { legs = "Feet", back = "Crest" }
 
 -- Which rule each kind's parts read, for the designer's labels.
 FurnitureRules.PART_NAMES = {
@@ -354,7 +393,7 @@ end
 
 -- The label of one rule on one kind ("Shade" for a lamp's shape).
 function FurnitureRules.partName(id: string, gene: string): string
-	local names = FurnitureRules.PART_NAMES[id]
+	local names = FurnitureRules.PART_NAMES[id] or (if FurnitureRules.DRESSED[id] then DRESSED_PARTS else nil)
 	if names and names[gene] then
 		return names[gene]
 	end

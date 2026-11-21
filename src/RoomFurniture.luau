@@ -64,10 +64,9 @@ RoomFurniture.MAX_DESIGNS = 40 -- different designed pieces you can hold at once
 export type Piece = { id: string, x: number, z: number, a: number, s: number, seed: number, key: string, r: string? }
 
 -- Every piece kind: its name and icon (for the bag, the market and the
--- decorate tools), and its price in tokens if the market sells its seed.
--- Pieces that hold finds (chests, cupboards, sideboards, parcels, honey,
--- baskets, barrels) and water tanks aren't sold: you only get those by
--- moving what your home grew.
+-- decorate tools), and its price in tokens in the market. Every piece is
+-- sold, plain or (with a recipe) dressed in a decor style; one you plant
+-- starts empty (DecorService), whatever it can hold.
 RoomFurniture.KINDS = {
 	bed = { name = "Seed-pod Bed", icon = "🛏️", price = 30 },
 	bunk = { name = "Bunk Bed", icon = "🛏️", price = 40 },
@@ -75,9 +74,9 @@ RoomFurniture.KINDS = {
 	table = { name = "Lily-pad Table", icon = "🍽️", price = 20 },
 	roundTable = { name = "Round Table", icon = "🍽️", price = 30 },
 	shelf = { name = "Bookcase", icon = "📚", price = 25 },
-	chest = { name = "Acorn Chest", icon = "🌰" },
-	cupboard = { name = "Leaf Cupboard", icon = "🚪" },
-	sideboard = { name = "Sideboard", icon = "🗄️" },
+	chest = { name = "Acorn Chest", icon = "🌰", price = 30 },
+	cupboard = { name = "Leaf Cupboard", icon = "🚪", price = 35 },
+	sideboard = { name = "Sideboard", icon = "🗄️", price = 35 },
 	rug = { name = "Petal Rug", icon = "🌸", price = 10 },
 	beanbag = { name = "Fluff Beanbag", icon = "☁️", price = 15 },
 	armchair = { name = "Petal Armchair", icon = "🪑", price = 20 },
@@ -86,8 +85,8 @@ RoomFurniture.KINDS = {
 	windowBox = { name = "Window Box", icon = "🌼", price = 12 },
 	lantern = { name = "Firefly Lantern", icon = "🏮", price = 10 },
 	hammock = { name = "Leaf Hammock", icon = "🍃", price = 30 },
-	parcels = { name = "Leaf Parcels", icon = "📦" },
-	honeycomb = { name = "Honey Dresser", icon = "🍯" },
+	parcels = { name = "Leaf Parcels", icon = "📦", price = 15 },
+	honeycomb = { name = "Honey Dresser", icon = "🍯", price = 40 },
 	stove = { name = "Pebble Hearth", icon = "🍲", price = 40 },
 	teacup = { name = "Teacup Table", icon = "☕", price = 20 },
 	mossbed = { name = "Moss Bed", icon = "🌿", price = 15 },
@@ -95,9 +94,9 @@ RoomFurniture.KINDS = {
 	telescope = { name = "Telescope", icon = "🔭", price = 40 },
 	desk = { name = "Writing Desk", icon = "✏️", price = 25 },
 	board = { name = "Notice Board", icon = "📋", price = 15 },
-	tank = { name = "Water Tank", icon = "🚰" },
-	barrel = { name = "Seed Barrel", icon = "🛢️" },
-	basket = { name = "Fruit Basket", icon = "🧺" },
+	tank = { name = "Water Tank", icon = "🚰", price = 35 },
+	barrel = { name = "Seed Barrel", icon = "🛢️", price = 15 },
+	basket = { name = "Fruit Basket", icon = "🧺", price = 10 },
 	compost = { name = "Compost Crate", icon = "🪱", price = 10 },
 	vat = { name = "Dye Vat", icon = "🎨", price = 20 },
 	stage = { name = "Little Stage", icon = "🎭", price = 50 },
@@ -136,7 +135,7 @@ end
 -- An item is a furniture seed you can hold: a kind ("bed"), or a designed
 -- kind with its recipe ("dchair.a02252211").
 function RoomFurniture.item(id: string, recipe: string?): string
-	if recipe and FurnitureRules.isKind(id) then
+	if recipe and FurnitureRules.takesRecipe(id) then
 		return id .. "." .. recipe
 	end
 	return id
@@ -162,7 +161,7 @@ function RoomFurniture.isItem(item: any): boolean
 		return false
 	end
 	if recipe then
-		return FurnitureRules.isKind(id) and FurnitureRules.valid(recipe)
+		return FurnitureRules.takesRecipe(id) and FurnitureRules.valid(recipe)
 	end
 	return true
 end
@@ -178,7 +177,13 @@ function RoomFurniture.name(id: string): string
 		return FurnitureRules.name(kind, recipe)
 	end
 	local k = RoomFurniture.KINDS[kind]
-	return if k then k.name else kind
+	local base = if k then k.name else kind
+	-- a dressed piece: "Mushroom Cottage Acorn Chest"
+	local style = if recipe then FurnitureRules.styleOf(recipe) else nil
+	if style and style.id ~= "mix" then
+		return style.name .. " " .. base
+	end
+	return base
 end
 
 function RoomFurniture.icon(id: string): string
@@ -237,7 +242,7 @@ function RoomFurniture.clean(p: Piece): Piece
 		s = math.clamp(round(p.s * 100), round(RoomFurniture.SCALE_MIN * 100), round(RoomFurniture.SCALE_MAX * 100)) / 100,
 		seed = math.clamp(round(p.seed), 1, RoomFurniture.SEED_MAX),
 		key = p.key,
-		r = if p.r and FurnitureRules.isKind(p.id) and FurnitureRules.valid(p.r) then p.r else nil,
+		r = if p.r and FurnitureRules.takesRecipe(p.id) and FurnitureRules.valid(p.r) then p.r else nil,
 	}
 end
 
