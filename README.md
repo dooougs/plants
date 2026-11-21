@@ -85,7 +85,24 @@ PlantBuilder.build(genome, progress, cf, { synth = true, examples = { "fern", "l
 - Determinism, growth and detail coherence hold as for classic plants: the
   skeleton is derived once per genome, and every choice is seeded by a stable
   per-node id.
-- Building plants (habitat) keep the classic stem their rooms are planned on.
+- Every grammar plant draws its own stature (about 0.62 to 1.45 times its
+  `height` gene's stem, most near 1), so plants of one kind finish at
+  different heights.
+- Building plants (habitat) keep the classic stem, rooms stacked up the
+  middle, unless their `roomStems` gene is on (`Genome.roomsAnywhere`, at
+  `Genome.ROOMS_ANYWHERE` = 0.2 or more). Then they grow from the grammar,
+  whatever the generator switch says, and `PlantSynth.Rooms` puts their rooms
+  on the main stem and on the side shoots growing from it: side shoots reach
+  out and stretch so their room clears the stem, a room may clear a shoot out
+  of its way, and higher `roomStems` leans further out onto the branches. A
+  wild building plant has 1 to 4 rooms above a possible ground hall; a home
+  (`options.maxRooms`) always has a ground hall and keeps its rooms where they
+  were as it grows more. A plant whose stems can't fit a whole home keeps the
+  classic stem.
+- `roomStems` reads 0 in every genome string saved before it existed, and
+  `Genome.fromSeed` sets it to 0, so existing and fixed buildings keep their
+  rooms exactly where they are. `Genome.spreadRooms(g, seed)` turns it on
+  (`PlantIndex.wild` does, for wild plants).
 - `PlantSynth.showcase()` lists eight plants the classic builder can't make
   (frond plant, whorl lily, candelabra, umbel shrub, trailing vine, flower
   spike and two hybrids), to try it out:
@@ -98,5 +115,5 @@ PlantBuilder.build(genome, progress, cf, { synth = true, examples = { "fern", "l
   end
   ```
 - Both switches are off by default. With them off every plant builds exactly
-  as before, and `Genome.hash` ignores the three new genes, so saved plants
-  keep their shapes. `PlantSynth.Corpus.add(id, name, src)` adds an example.
+  as before (building plants aside, see `roomStems`), and `Genome.hash`
+  ignores the genes added since, so saved plants keep their shapes. `PlantSynth.Corpus.add(id, name, src)` adds an example.

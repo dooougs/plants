@@ -14,7 +14,12 @@
 	PlantBuilder's plantRng. The same genome gives the same plant on every
 	server and client, and a choice at one node never shifts another's.
 
-	Salts used: 3 node star, 11 axis length (Layout uses 1, 2 and 977, Organs 5).
+	Height: every plant draws its own stature (salt 13), so plants of one
+	kind reach different heights when fully grown, and its main stem's node
+	count wanders a node either way (salt 17). Layout scales the stem by it.
+
+	Salts used: 3 node star, 11 axis length, 13 stature, 17 main stem length
+	(Layout uses 1, 2 and 977, Organs 5, Rooms 19 and 23).
 ]]
 
 local Rules = require(script.Parent.Rules)
@@ -42,6 +47,8 @@ export type Axis = {
 	order: number,
 	label: string,
 	parentType: string?,
+	parent: Axis?, -- the axis it grows from (nil for the main axis)
+	parentNode: Node?, -- the node it grows from
 	vid: number,
 	n: number,
 	nodes: { Node },
@@ -53,6 +60,7 @@ export type Graph = {
 	organs: { Organ },
 	Tmax: number,
 	frank: { [number]: number }, -- flower id -> 0 first to open .. 1 last
+	stature: number, -- this plant's own height factor (about 0.62 to 1.45)
 	stats: { r1: number, r0: number, rz: number, forced: number },
 }
 
@@ -97,14 +105,23 @@ function Derive.derive(g: { [string]: number }, seed: number, G: Rules.Grammar):
 		organs = {},
 		Tmax = 0,
 		frank = {},
+		stature = 1,
 		stats = { r1 = 0, r0 = 0, rz = 0, forced = 0 },
 	}
 	local count = 0
 	local rootType = if G.roots.Z and (g.form < 0.3 or not G.roots.S) then "Z" elseif G.roots.S then "S" else "Z"
+	-- Building plants are never rosettes: their rooms need an upright stem.
+	if (g.habitat or 0) >= 0.9 then
+		rootType = "S"
+	end
+	-- Two draws averaged: most plants near the middle, a few much taller or shorter.
+	local hr = Derive.rng(seed, 1, 13)
+	graph.stature = 0.62 + 0.83 * (hr:NextNumber() + hr:NextNumber()) / 2
 
 	local function axisLen(kind: string, order: number, label: string, vid: number): number
 		if kind == "S" and order == 0 then
-			return 3 + math.floor(g.nodes * 9) -- PlantBuilder's main stem
+			-- PlantBuilder's main stem, give or take a node.
+			return math.max(3, 3 + math.floor(g.nodes * 9) + Derive.rng(seed, vid, 17):NextInteger(-1, 1))
 		elseif kind == "Z" then
 			return 6 + math.floor(g.nodes * 14) -- PlantBuilder's rosette
 		end
@@ -136,10 +153,22 @@ function Derive.derive(g: { [string]: number }, seed: number, G: Rules.Grammar):
 		return true
 	end
 
-	local grow: (string, number, number, number, string?) -> Axis
-	function grow(kind: string, order: number, vid: number, t0: number, parentType: string?): Axis
+	local grow: (string, number, number, number, Node?) -> Axis
+	function grow(kind: string, order: number, vid: number, t0: number, parentNode: Node?): Axis
 		local label = Rules.labelOf(kind, order)
-		local ax: Axis = { id = #graph.axes + 1, type = kind, order = order, label = label, parentType = parentType, vid = vid, n = 0, nodes = {} }
+		local parent = if parentNode then parentNode.axis else nil
+		local ax: Axis = {
+			id = #graph.axes + 1,
+			type = kind,
+			order = order,
+			label = label,
+			parentType = if parent then parent.type else nil,
+			parent = parent,
+			parentNode = parentNode,
+			vid = vid,
+			n = 0,
+			nodes = {},
+		}
 		table.insert(graph.axes, ax)
 		local n = axisLen(kind, order, label, vid)
 		ax.n = n
@@ -207,7 +236,7 @@ function Derive.derive(g: { [string]: number }, seed: number, G: Rules.Grammar):
 					table.insert(graph.organs, { vid = v2, kind = tok, node = node })
 					count += 1
 				else
-					local child = grow(tok, Rules.childOrder(kind, tok, order), v2, node.t + 1, kind)
+					local child = grow(tok, Rules.childOrder(kind, tok, order), v2, node.t + 1, node)
 					table.insert(node.atts, { vid = v2, kind = "axis", axis = child })
 				end
 			end

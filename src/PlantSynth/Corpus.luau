@@ -58,6 +58,11 @@ Corpus.revision = 0
 -- How much a donor example counts against the plant's own (1).
 Corpus.DONOR_WEIGHT = 0.6
 
+-- Examples whose main stem grows side shoots.
+Corpus.BRANCHING = { daisy = true, shrub = true, candelabra = true, hogweed = true } :: { [string]: boolean }
+-- Building plants with roomStems this high grow side shoots for their rooms.
+Corpus.BRANCHY_ROOMS = 0.45
+
 local AXES = { S = true, Z = true, R = true, I = true, V = true }
 local ORGANS = { L = true, F = true, T = true }
 
@@ -162,6 +167,11 @@ end
 	for plants a game hands out with a fixed body plan.
 ]]
 function Corpus.forGenome(genes: { [string]: number }, bodyKey: string, override: { string }?): ({ Entry }, string)
+	-- Building plants need an upright stem: one whose body plan is a rosette
+	-- grows from the shrub instead (more stems to put rooms on).
+	if (genes.habitat or 0) >= 0.9 and bodyKey == "rosette" then
+		bodyKey = "shrub"
+	end
 	local list: { Entry } = {}
 	if override and #override > 0 then
 		for _, id in override do
@@ -173,6 +183,12 @@ function Corpus.forGenome(genes: { [string]: number }, bodyKey: string, override
 		local primary = Corpus.BODY_EXAMPLE[bodyKey] or "daisy"
 		table.insert(list, { ex = Corpus.byId[primary], weight = 1 })
 		local donor = Corpus.donorFor(primary, genes.donor or 0.5)
+		-- A building plant that leans its rooms out onto side shoots (roomStems,
+		-- see PlantSynth.Rooms) needs some: a single-stemmed body plan borrows
+		-- the shrub's branching.
+		if not donor and (genes.habitat or 0) >= 0.9 and (genes.roomStems or 0) >= Corpus.BRANCHY_ROOMS and not Corpus.BRANCHING[primary] then
+			donor = "shrub"
+		end
 		if donor then
 			table.insert(list, { ex = Corpus.byId[donor], weight = Corpus.DONOR_WEIGHT })
 		end
