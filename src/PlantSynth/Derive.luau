@@ -17,9 +17,11 @@
 	Height: every plant draws its own stature (salt 13), so plants of one
 	kind reach different heights when fully grown, and its main stem's node
 	count wanders a node either way (salt 17). Layout scales the stem by it.
+	Most plants finish near their kind's height; a few grow up to about
+	twice as tall as the tallest did in 0.1.3 (homes keep their 0.1.3 height).
 
 	Salts used: 3 node star, 11 axis length, 13 stature, 17 main stem length
-	(Layout uses 1, 2 and 977, Organs 5, Rooms 19 and 23).
+	(Layout uses 1, 2 and 977, Organs 5, Rooms 19 and 21).
 ]]
 
 local Rules = require(script.Parent.Rules)
@@ -60,9 +62,11 @@ export type Graph = {
 	organs: { Organ },
 	Tmax: number,
 	frank: { [number]: number }, -- flower id -> 0 first to open .. 1 last
-	stature: number, -- this plant's own height factor (about 0.62 to 1.45)
+	stature: number, -- this plant's own height factor (about 0.62 to 2.9)
 	stats: { r1: number, r0: number, rz: number, forced: number },
 }
+
+Derive.HOME_HABITAT = 0.99 -- homes and town buildings are grown at habitat 1
 
 function Derive.vidOf(parent: number, slot: number): number
 	return (parent * 33 + slot * 7919 + 17) % PRIME
@@ -114,9 +118,16 @@ function Derive.derive(g: { [string]: number }, seed: number, G: Rules.Grammar):
 	if (g.habitat or 0) >= 0.9 then
 		rootType = "S"
 	end
-	-- Two draws averaged: most plants near the middle, a few much taller or shorter.
+	-- Two draws averaged: most plants near the middle, a few much taller or
+	-- shorter, and a long tail of giants up to twice the old tallest (0.1.4).
+	-- Homes (habitat 1) keep the 0.1.3 heights, so a home's rooms and the
+	-- furniture in them stay where they were.
 	local hr = Derive.rng(seed, 1, 13)
-	graph.stature = 0.62 + 0.83 * (hr:NextNumber() + hr:NextNumber()) / 2
+	local t = (hr:NextNumber() + hr:NextNumber()) / 2
+	graph.stature = 0.62 + 0.83 * t
+	if (g.habitat or 0) < Derive.HOME_HABITAT then
+		graph.stature += 1.45 * t ^ 4
+	end
 
 	local function axisLen(kind: string, order: number, label: string, vid: number): number
 		if kind == "S" and order == 0 then

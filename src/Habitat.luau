@@ -31,7 +31,7 @@
 
 	PlantBuilder calls:
 	  Habitat.plan(genes, segments, rng) -> { [segment index] = room number }
-	  Habitat.room(genes, number, swell, stemRadius) -> Room (its size)
+	  Habitat.room(genes, number, swell, stemRadius, size?) -> Room (its size)
 	  Habitat.build(ctx, bottomCFrame, room, stemRadiusBelow, stemRadiusAbove)
 	Habitat.size(genes, swell) -> (hall half-width, hall height)   (used by the Market)
 ]]
@@ -154,7 +154,10 @@ export type Room = {
 }
 
 -- The size of room `number` at growth `swell`, round a stem of radius stemR.
-function Habitat.room(g, number: number, swell: number, stemR: number): Room
+-- size (default 1) scales the room's floor and height, not its walls, doors
+-- or windows: a bigger plant can carry a bigger room (PlantSynth.Layout).
+function Habitat.room(g, number: number, swell: number, stemR: number, size: number?): Room
+	local k = size or 1
 	local s = math.max(swell, 0.05)
 	local u = s * Habitat.UNIT
 	local wall = 0.6 * u
@@ -166,6 +169,8 @@ function Habitat.room(g, number: number, swell: number, stemR: number): Room
 	local halfX, halfZ, round, floorY, coreLo, top, h, doorHeight, doorHalf, windowHalf
 	if ground then
 		local R, Hc = Habitat.size(g, s)
+		R *= k
+		Hc *= k
 		halfX = math.max(R, minHalf)
 		halfZ = halfX
 		top = math.max(Hc * 0.8, 12 * u)
@@ -178,8 +183,8 @@ function Habitat.room(g, number: number, swell: number, stemR: number): Room
 		windowHalf = halfX * 0.18
 	else
 		local f = math.max(0.7, 1 - 0.06 * (number - 1))
-		h = lerp(11, 15, g.height) * u * f
-		halfX = math.max(lerp(12, 16, g.stemThickness) * u * f, minHalf)
+		h = lerp(11, 15, g.height) * u * f * k
+		halfX = math.max(lerp(12, 16, g.stemThickness) * u * f * k, minHalf)
 		halfZ = math.max(halfX * lerp(0.85, 1, g.leafLength), minHalf)
 		round = math.min(halfX, halfZ) * 0.3
 		-- The floor sits where the walls stop curving in, over a rounded belly.
