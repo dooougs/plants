@@ -1775,6 +1775,20 @@ PIECES.fireplace = {
 	end,
 }
 
+-- Every grown piece can also grow dressed in a decor style (its want's
+-- p.styled, a FurnitureRules design): its own body in the style's colours,
+-- with the grammar's trim and crest (FurnitureGrammar.dress). What it does
+-- (its lid, doors, light, seat) is unchanged.
+for id, piece in PIECES do
+	local base = piece.build
+	piece.build = function(B, c, p, rng)
+		if p and p.styled then
+			return FurnitureGrammar.dress(id, B, c, p, base, rng)
+		end
+		return base(B, c, p, rng)
+	end
+end
+
 -- Designed pieces (Shared.Plants.FurnitureRules / FurnitureGrammar): grown
 -- from a recipe of rule choices instead of rolled from a seed. With no
 -- recipe (an admin's gift) one is rolled from the seed, within one style.
@@ -1999,6 +2013,10 @@ local function wantFor(id: string, opts: { [string]: any }?, rng: Random, recipe
 		return nil
 	end
 	local p = piece.params(rng, recipe)
+	if not piece.design and recipe then
+		-- a grown piece dressed in a style (its sizes are its own, from rng)
+		p.styled = FurnitureRules.decode(recipe)
+	end
 	local w = {
 		id = id,
 		r = if piece.design then p.recipe else nil,
@@ -2019,7 +2037,7 @@ local function wantFor(id: string, opts: { [string]: any }?, rng: Random, recipe
 		-- the seats have a seed of their own, so each can be moved on its own
 		-- and still look the same (Shared.Housing.RoomFurniture)
 		local seatSeed = rng:NextInteger(1, SEED_MAX)
-		local seat = wantFor(piece.seats.id, nil, Random.new(seatSeed))
+		local seat = wantFor(piece.seats.id, nil, Random.new(seatSeed), if p.styled then recipe else nil)
 		if seat then
 			seat.seed = seatSeed
 			seat.n = piece.seats.n
@@ -2069,7 +2087,8 @@ end
 local function grownWant(id: string, opts: { [string]: any }?, seed: number, decor: any?): any?
 	local styled = decor and FurnitureRules.STYLED[id]
 	if not styled then
-		return wantFor(id, opts, Random.new(seed))
+		-- every other piece keeps its body, dressed in the style
+		return wantFor(id, opts, Random.new(seed), if decor then FurnitureRules.groupRecipe(decor, id, seed) else nil)
 	end
 	local w = wantFor(styled, opts, Random.new(seed), FurnitureRules.groupRecipe(decor, styled, seed))
 	if not w then
@@ -2225,7 +2244,7 @@ Furniture.FLOOR_NAME = "RoomFloor"
 -- Grows one piece by itself (the decorate tools' see-through piece you
 -- carry, the market's preview), standing on CFrame `o`, at `unit` studs per
 -- normal stud. `id` may be an item, "kind.recipe" (RoomFurniture.item).
-function Furniture.growPiece(colors: any, id: string, seed: number, o: CFrame, unit: number, parent: Instance): (Model?, any?)
+function Furniture.growPiece(colors: any, id: string, seed: number, o: CFrame, unit: number, parent: Instance): (Model?, any?, any?)
 	local recipe
 	id, recipe = RoomFurniture.splitItem(id)
 	local piece = PIECES[id]
@@ -2236,9 +2255,9 @@ function Furniture.growPiece(colors: any, id: string, seed: number, o: CFrame, u
 	local model = Instance.new("Model")
 	model.Name = "Furniture" .. id
 	local B = builder({ model = model, colors = colors }, o, unit)
-	piece.build(B, colors, w.p, Random.new(seed * 7 + 3))
+	local made = piece.build(B, colors, w.p, Random.new(seed * 7 + 3))
 	model.Parent = parent
-	return model, w
+	return model, w, made
 end
 
 -- A piece's planner want (sizes) from its seed (and recipe, for a
@@ -2274,14 +2293,25 @@ function Furniture.furnish(ctx, frame: CFrame, room: any, keepClear: number)
 	local pause = ctx.breathe
 	local mark = ctx.geometryMark
 	local construction = if mark then mark("PlantFurnitureLayout") else nil
+	-- Every building furnishes in a decor style (ctx.decorSeed: its town's,
+	-- or a home's own): designed pieces where there's a stand-in, every
+	-- other piece dressed in it.
+	local decor = if ctx.decorSeed then FurnitureRules.groupStyle(ctx.decorSeed) else nil
 	if arranged then
-		-- its owner's own arrangement (Shared.Housing.RoomFurniture)
+		-- its owner's own arrangement (Shared.Housing.RoomFurniture): designed
+		-- pieces keep their own recipe, grown ones are dressed in the home's
+		-- style (same sizes and places, so nothing moves)
 		layout = {}
 		for _, piece in arranged do
 			if pause then
 				pause()
 			end
-			local w = wantFor(piece.id, nil, Random.new(piece.seed), piece.r)
+			local recipe = piece.r
+			local own = PIECES[piece.id]
+			if not recipe and decor and own and not own.design then
+				recipe = FurnitureRules.groupRecipe(decor, piece.id, piece.seed)
+			end
+			local w = wantFor(piece.id, nil, Random.new(piece.seed), recipe)
 			if w then
 				w.seed = piece.seed
 				local lx, lz = RoomFurniture.look(piece.a)
@@ -2289,8 +2319,6 @@ function Furniture.furnish(ctx, frame: CFrame, room: any, keepClear: number)
 			end
 		end
 	else
-		-- homes keep their own grown look; other buildings take their town's style
-		local decor = if ctx.decorSeed and ctx.building ~= "House" then FurnitureRules.groupStyle(ctx.decorSeed) else nil
 		layout = Furniture.layout(purpose :: string, planRoom, ctx.rng(6029, room.number), pause, decor)
 	end
 	if mark then

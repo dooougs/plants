@@ -70,6 +70,10 @@ FurnitureRules.KINDS = {
 	dbed = { name = "Bed", icon = "🛏️", uses = { legs = true, shape = true, back = true, trim = true, weight = true, size = true, colour = true }, price = 34 },
 	dlamp = { name = "Floor Lamp", icon = "🏮", uses = { legs = true, shape = true, trim = true, weight = true, size = true, colour = true }, price = 14 },
 	dshelf = { name = "Bookcase", icon = "📚", uses = { legs = true, shape = true, back = true, trim = true, weight = true, size = true, colour = true }, price = 28 },
+	-- building furniture (not sold): market stalls and counters, grown in
+	-- their town's style by the buildings themselves
+	dstall = { name = "Market Stall", icon = "⛺", uses = { legs = true, shape = true, back = true, trim = true, weight = true, size = true, colour = true }, civic = true },
+	dcounter = { name = "Counter", icon = "🛎️", uses = { legs = true, shape = true, back = true, trim = true, weight = true, size = true, colour = true }, civic = true },
 }
 FurnitureRules.ORDER = { "dchair", "dtable", "dstool", "dbench", "dbed", "dlamp", "dshelf" }
 
@@ -82,6 +86,8 @@ FurnitureRules.PART_NAMES = {
 	dchair = { shape = "Seat" },
 	dstool = { shape = "Seat" },
 	dbench = { shape = "Seat" },
+	dstall = { shape = "Awning", back = "Backboard" },
+	dcounter = { legs = "Feet", back = "Front" },
 }
 
 -- Decor styles. Each lists the choices it allows for each rule (by number,
@@ -300,7 +306,8 @@ function FurnitureRules.groupStyle(seed: number): Group
 end
 
 -- The recipe of one piece of kind `id` in group style `g`, from its seed.
-function FurnitureRules.groupRecipe(g: Group, id: string, seed: number): string
+-- `fixed` sets some rules outright (a counter's size to fit its hall).
+function FurnitureRules.groupRecipe(g: Group, id: string, seed: number, fixed: { [string]: number }?): string
 	local s = FurnitureRules.STYLES[g.style]
 	local next = lcg(seed * 31 + 7)
 	next(1, 2)
@@ -308,6 +315,9 @@ function FurnitureRules.groupRecipe(g: Group, id: string, seed: number): string
 	for _, gene in { "back", "trim", "weight", "size" } do
 		local allow = s.allow[gene]
 		d[gene] = allow[next(1, #allow)]
+	end
+	for gene, v in fixed or {} do
+		d[gene] = v
 	end
 	return FurnitureRules.encode(d :: Design)
 end
