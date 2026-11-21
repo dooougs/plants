@@ -127,6 +127,15 @@ end
 Layout.ROOM_GAP = 0.15 -- design studs of air kept round a room
 
 -- The circle round a room's walls, plus ROOM_GAP.
+-- How big a plant's rooms are next to a plant of ordinary height (1):
+-- rooms grow with the plant's stature, from 0.85 on the smallest plants up
+-- to 1.8 on the giants.
+Layout.ROOM_SIZE_MIN = 0.85
+Layout.ROOM_SIZE_MAX = 1.8
+function Layout.roomSize(stature: number): number
+	return math.clamp(stature ^ 0.7, Layout.ROOM_SIZE_MIN, Layout.ROOM_SIZE_MAX)
+end
+
 function Layout.roomReach(room: Habitat.Room): number
 	local a, c = room.halfX - room.round, room.halfZ - room.round
 	return math.sqrt(a * a + c * c) + room.round + Layout.ROOM_GAP
@@ -167,6 +176,10 @@ function Layout.layout(G: Derive.Graph, g: { [string]: number }, p: number, plan
 	end
 	local vegStart, vegEnd = Growth.VEGETATIVE[1], Growth.VEGETATIVE[2]
 	local stature = G.stature or 1
+	-- Bigger plants carry bigger rooms (and small ones smaller rooms): the
+	-- room grows with the plant's stature. Homes keep the 0.1.3 size, so
+	-- their rooms and the furniture in them stay where they were.
+	local roomSize = if (g.habitat or 0) >= Derive.HOME_HABITAT then 1 else Layout.roomSize(stature)
 	local H = lerp(3, 16, g.height) * stature
 	local R0 = lerp(0.2, 0.9, g.stemThickness) * lerp(0.7, 1.2, g.height) -- mainStemThickness
 	local leafLen0 = lerp(0.9, 3.6, g.leafSize) -- leafLength
@@ -208,7 +221,7 @@ function Layout.layout(G: Derive.Graph, g: { [string]: number }, p: number, plan
 	-- classic stem sizes it), its door turned away from the main stem when
 	-- it sits on a side shoot.
 	local function roomAt(number: number, grow: number, stemR: number, bottom: Vector3, isMain: boolean): Habitat.Room
-		local room = Habitat.room(g, number, (swell :: number) * grow, stemR)
+		local room = Habitat.room(g, number, (swell :: number) * grow, stemR, roomSize)
 		local out2 = if not isMain and number ~= 0 then flat(bottom) else nil
 		if out2 then
 			room.doorAz = math.atan2(out2.Z, out2.X)

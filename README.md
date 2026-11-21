@@ -88,7 +88,9 @@ PlantBuilder.build(genome, progress, cf, { synth = true, examples = { "fern", "l
 - Every grammar plant draws its own stature (about 0.62 to 2.9 times its
   `height` gene's stem, most near 1, a few giants), so plants of one kind
   finish at different heights. Homes (habitat 1) keep their 0.1.3 heights
-  (0.62 to 1.45) so their rooms never move.
+  (0.62 to 1.45) so their rooms never move. Bigger plants carry bigger rooms:
+  a building plant's rooms scale with its stature (`Layout.roomSize`, 0.85 to
+  1.8 times the usual size); homes keep the usual size.
 - Building plants (habitat) keep the classic stem, rooms stacked up the
   middle, unless their `roomStems` gene is on (`Genome.roomsAnywhere`, at
   `Genome.ROOMS_ANYWHERE` = 0.2 or more). Then they grow from the grammar,
