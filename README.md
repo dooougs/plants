@@ -85,9 +85,10 @@ PlantBuilder.build(genome, progress, cf, { synth = true, examples = { "fern", "l
 - Determinism, growth and detail coherence hold as for classic plants: the
   skeleton is derived once per genome, and every choice is seeded by a stable
   per-node id.
-- Every grammar plant draws its own stature (about 0.62 to 1.45 times its
-  `height` gene's stem, most near 1), so plants of one kind finish at
-  different heights.
+- Every grammar plant draws its own stature (about 0.62 to 2.9 times its
+  `height` gene's stem, most near 1, a few giants), so plants of one kind
+  finish at different heights. Homes (habitat 1) keep their 0.1.3 heights
+  (0.62 to 1.45) so their rooms never move.
 - Building plants (habitat) keep the classic stem, rooms stacked up the
   middle, unless their `roomStems` gene is on (`Genome.roomsAnywhere`, at
   `Genome.ROOMS_ANYWHERE` = 0.2 or more). Then they grow from the grammar,
@@ -95,7 +96,8 @@ PlantBuilder.build(genome, progress, cf, { synth = true, examples = { "fern", "l
   on the main stem and on the side shoots growing from it: side shoots reach
   out and stretch so their room clears the stem, a room may clear a shoot out
   of its way, and higher `roomStems` leans further out onto the branches. A
-  wild building plant has 1 to 4 rooms above a possible ground hall; a home
+  wild building plant has a room at every site that fits (no set count, up
+  to a safety limit of `Rooms.CAP`) above a possible ground hall; a home
   (`options.maxRooms`) always has a ground hall and keeps its rooms where they
   were as it grows more. A plant whose stems can't fit a whole home keeps the
   classic stem.

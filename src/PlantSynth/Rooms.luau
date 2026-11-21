@@ -18,16 +18,17 @@
 	              rooms, the stems and (first time round) the leaves, and up
 	              off the ground
 
-	Rooms.sites lists up to MAX - 1 sites for a plant. A plant with n rooms
-	above the ground uses the first n, so a home that grows a room keeps the
-	rooms it had exactly where they were: a site is only ever checked against
-	the rooms picked before it, and is never under one of them on its stem
-	(it would push that room up).
+	Rooms.sites lists every site that fits (up to CAP, a safety limit). A
+	wild building plant has a room at every one of them, so a big plant can
+	have many; a home with n rooms above the ground uses the first n, so a
+	home that grows a room keeps the rooms it had exactly where they were: a
+	site is only ever checked against the rooms picked before it, and is
+	never under one of them on its stem (it would push that room up).
 
 	Everything is derived from the genome and seed, so every server and
 	client puts the rooms in the same places.
 
-	Salts used: 19 ground hall, 21 site order, 23 room count.
+	Salts used: 19 ground hall, 21 site order.
 ]]
 
 local Habitat = require(script.Parent.Parent.Habitat)
@@ -36,7 +37,8 @@ local Layout = require(script.Parent.Layout)
 
 local Rooms = {}
 
-Rooms.MAX = 5 -- rooms in all, ground hall included (as many as a home grows)
+Rooms.MAX = 5 -- a home's rooms in all, ground hall included (as many as a home grows)
+Rooms.CAP = 32 -- upper rooms a wild plant may have at most (a safety limit; they must fit)
 Rooms.LIFT = 0.5 -- an upper room's floor is at least this far up (design studs), plus a share of its width
 
 export type Sites = { number } -- node vids, room 1 first
@@ -48,13 +50,6 @@ end
 -- Whether a plant without a set room count (a wild one) has a ground hall.
 function Rooms.hallFor(g: { [string]: number }, seed: number): boolean
 	return g.habitat >= 0.99 or Derive.rng(seed, 1, 19):NextNumber() < Habitat.GROUND_HALL_CHANCE
-end
-
--- How many rooms above the ground a wild building plant has: 1 to 4, more
--- on plants with more nodes.
-function Rooms.countFor(g: { [string]: number }, seed: number): number
-	local r = Derive.rng(seed, 1, 23):NextNumber()
-	return 1 + math.floor((0.4 * g.nodes + 0.6 * r) * 3.999)
 end
 
 -- The node a node's axis grows from, up to the main axis: is `a` on the way
@@ -155,8 +150,8 @@ local cache: { [Derive.Graph]: { [string]: Result } } = setmetatable({}, { __mod
 Rooms.PRUNE = 3 -- side shoots a room may clear out of its way
 
 --[[
-	Up to MAX - 1 sites for the upper rooms of a plant, room 1 first (fewer
-	if no more fit), and the side shoots they cleared away. hall: whether the
+	Every site that fits (at most CAP) for the upper rooms of a plant, room
+	1 first, and the side shoots they cleared away. hall: whether the
 	main stem's first internode is a ground hall. lean (0..1): how strongly
 	the plant puts its rooms out on side shoots rather than up the main stem.
 	breathe: called between tries (may yield), for big plants built over
@@ -265,7 +260,7 @@ function Rooms.sites(G: Derive.Graph, g: { [string]: number }, hall: boolean, le
 	-- Twice through: first keeping clear of leaves too, then of stems only.
 	for _, strict in { true, false } do
 		for _, c in cands do
-			if #sites >= Rooms.MAX - 1 then
+			if #sites >= Rooms.CAP then
 				break
 			end
 			if not free(c.node) then

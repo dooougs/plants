@@ -101,7 +101,7 @@ end
 	no room for a full home).
 
 	maxRooms: a home's room count, ground hall included (it always has one);
-	nil for a wild building plant, which has its own count (Rooms.countFor).
+	nil for a wild building plant, which has a room at every site that fits.
 	Homes are planned for Rooms.MAX rooms and use the first maxRooms, so a
 	home that grows a room keeps the others where they were.
 ]]
@@ -128,7 +128,7 @@ function PlantSynth.roomPlan(genome: Genome.Genome, seed: number?, examples: { s
 		if #sites == 0 then
 			return nil
 		end
-		want = Rooms.countFor(g, G.seed)
+		want = #sites
 	end
 	local map = {}
 	if hall then
