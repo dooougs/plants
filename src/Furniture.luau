@@ -55,6 +55,7 @@ local RoomFurniture = require(script.Parent.RoomFurniture)
 local Drafts = require(script.Parent.Drafts)
 local RoomLamps = require(script.Parent.RoomLamps)
 local FurnitureGrammar = require(script.Parent.FurnitureGrammar)
+local FurnitureRules = require(script.Parent.FurnitureRules)
 
 local Furniture = {}
 
@@ -2062,8 +2063,43 @@ function Furniture.plannerRoom(room: any, keepClear: number, publicRoom: boolean
 	}
 end
 
--- The layout for one room: purpose -> wants -> RoomPlanner.
-function Furniture.layout(purpose: string, planRoom: any, rng: Random, pause: (() -> ())?): { any }
+-- One want for a grown piece: as it is, or (in a styled room, `decor`)
+-- swapped for a designed piece of the group's style (FurnitureRules.STYLED),
+-- its recipe grown from the piece's own seed.
+local function grownWant(id: string, opts: { [string]: any }?, seed: number, decor: any?): any?
+	local styled = decor and FurnitureRules.STYLED[id]
+	if not styled then
+		return wantFor(id, opts, Random.new(seed))
+	end
+	local w = wantFor(styled, opts, Random.new(seed), FurnitureRules.groupRecipe(decor, styled, seed))
+	if not w then
+		return nil
+	end
+	-- hints that name other pieces name their styled stand-ins
+	if w.near then
+		w.near = FurnitureRules.STYLED[w.near] or w.near
+	end
+	if w.facing then
+		w.facing = FurnitureRules.STYLED[w.facing] or w.facing
+	end
+	local legacy = PIECES[id]
+	if legacy and legacy.seats then
+		local seatSeed = Random.new(seed):NextInteger(1, SEED_MAX)
+		local seatId = FurnitureRules.STYLED_SEAT
+		local seat = wantFor(seatId, nil, Random.new(seatSeed), FurnitureRules.groupRecipe(decor, seatId, seatSeed))
+		if seat then
+			seat.seed = seatSeed
+			seat.n = legacy.seats.n
+			w.seats = seat
+		end
+	end
+	return w
+end
+
+-- The layout for one room: purpose -> wants -> RoomPlanner. `decor` (a
+-- FurnitureRules group style) grows designed pieces in its style instead
+-- of the plain grown ones it has a stand-in for.
+function Furniture.layout(purpose: string, planRoom: any, rng: Random, pause: (() -> ())?, decor: any?): { any }
 	local spec = Furniture.PURPOSES[purpose]
 	if not spec then
 		return {}
@@ -2074,7 +2110,7 @@ function Furniture.layout(purpose: string, planRoom: any, rng: Random, pause: ((
 			local n = if entry.n then rng:NextInteger(entry.n[1], entry.n[2]) else 1
 			for _ = 1, n do
 				local seed = rng:NextInteger(1, SEED_MAX)
-				local w = wantFor(entry.id, entry, Random.new(seed))
+				local w = grownWant(entry.id, entry, seed, decor)
 				if w then
 					w.seed = seed
 					table.insert(wants, w)
@@ -2086,7 +2122,7 @@ function Furniture.layout(purpose: string, planRoom: any, rng: Random, pause: ((
 	for _, id in (if planRoom.skipFill then {} else spec.fill or {}) do
 		table.insert(fill, function()
 			local seed = rng:NextInteger(1, SEED_MAX)
-			local w = wantFor(id, nil, Random.new(seed))
+			local w = grownWant(id, nil, seed, decor)
 			if w then
 				w.seed = seed
 			end
@@ -2253,7 +2289,9 @@ function Furniture.furnish(ctx, frame: CFrame, room: any, keepClear: number)
 			end
 		end
 	else
-		layout = Furniture.layout(purpose :: string, planRoom, ctx.rng(6029, room.number), pause)
+		-- homes keep their own grown look; other buildings take their town's style
+		local decor = if ctx.decorSeed and ctx.building ~= "House" then FurnitureRules.groupStyle(ctx.decorSeed) else nil
+		layout = Furniture.layout(purpose :: string, planRoom, ctx.rng(6029, room.number), pause, decor)
 	end
 	if mark then
 		mark(construction)
