@@ -19,7 +19,13 @@ Procedural plants for Roblox, extracted from Plant World.
   short recipe of rule choices (legs, shape, back, trim, weight, size,
   colour), with **decor styles** that keep a set matching
   (**FurnitureRules**, after Liu et al. 2015, "Style Compatibility for 3D
-  Furniture Models").
+  Furniture Models"). Market stalls and counters (`dstall`, `dcounter`) are
+  grammar kinds too. Every other grown piece (chests, cupboards, barrels,
+  rugs...) can be **dressed** in a style: its own working body in the
+  style's colours plus the grammar's trim, crest and feet
+  (`FurnitureGrammar.dress`, `FurnitureRules.DRESSED`), so any kind can be
+  designed and bought in a style. Pass `decorSeed` to PlantBuilder and a
+  building furnishes in that style, homes included.
 - **RoomTidy**: suggests a better arrangement of a room's pieces by interior
   design rules (after Merrell et al. 2011, "Interactive Furniture Layout
   Using Interior Design Guidelines").
@@ -28,7 +34,7 @@ Procedural plants for Roblox, extracted from Plant World.
 
 ```toml
 [dependencies]
-Plants = "dooougs/plants@0.1.7"
+Plants = "dooougs/plants@0.1.8"
 ```
 
 ## Use

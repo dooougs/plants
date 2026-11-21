@@ -2016,6 +2016,12 @@ local function wantFor(id: string, opts: { [string]: any }?, rng: Random, recipe
 	if not piece.design and recipe then
 		-- a grown piece dressed in a style (its sizes are its own, from rng)
 		p.styled = FurnitureRules.decode(recipe)
+		-- chests and cupboards stand on feet of the legs rule
+		local lift = FurnitureGrammar.liftOf(id, p.styled)
+		if lift > 0 then
+			p.lift = lift
+			p.h += lift
+		end
 	end
 	local w = {
 		id = id,
