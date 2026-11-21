@@ -165,6 +165,12 @@ FurnitureUse.KINDS = {
 	shelf = { action = "read", object = "Bookcase", text = "Read a book" },
 	board = { action = "read", object = "Notice board", text = "Read the notes" },
 	tank = { action = "water", object = "Water tank", text = "Fill watering can" },
+	-- designed pieces (Shared.Plants.FurnitureGrammar)
+	dchair = { action = "sit", object = "Chair", text = "Sit" },
+	dstool = { action = "sit", object = "Stool", text = "Sit" },
+	dbench = { action = "sit", object = "Bench", text = "Sit" },
+	dlamp = { action = "light", object = "Lamp", text = "Turn off", textOff = "Turn on", glow = { "LampBulb" } },
+	dshelf = { action = "read", object = "Bookcase", text = "Read a book" },
 } :: { [string]: Kind }
 
 -- Where you sit on a piece, in its own frame (normal studs, front -Z),
@@ -179,6 +185,10 @@ FurnitureUse.SEATS = {
 	desk = function(p) return CFrame.new(0, p.H - 0.48, -3.4 / 2 + 0.75) * CFrame.Angles(0, math.pi, 0) end,
 	rug = function(p) return Vector3.new(0, 0.3, 0) end,
 	mossbed = function(p) return Vector3.new(0, 0.75, 0) end,
+	-- designed seats: p.seatY is the top of the seat (FurnitureGrammar.params)
+	dchair = function(p) return Vector3.new(0, p.seatY + 0.15, -0.1) end,
+	dstool = function(p) return Vector3.new(0, p.seatY + 0.2, 0) end,
+	dbench = function(p) return Vector3.new(0, p.seatY + 0.15, -0.05) end,
 } :: { [string]: (any) -> Vector3 | CFrame }
 
 -- Where a telescope's lens is and which way it looks, in its own frame.

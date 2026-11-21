@@ -54,6 +54,7 @@ local FurnitureUse = require(script.Parent.FurnitureUse)
 local RoomFurniture = require(script.Parent.RoomFurniture)
 local Drafts = require(script.Parent.Drafts)
 local RoomLamps = require(script.Parent.RoomLamps)
+local FurnitureGrammar = require(script.Parent.FurnitureGrammar)
 
 local Furniture = {}
 
@@ -1773,7 +1774,24 @@ PIECES.fireplace = {
 	end,
 }
 
+-- Designed pieces (Shared.Plants.FurnitureRules / FurnitureGrammar): grown
+-- from a recipe of rule choices instead of rolled from a seed. With no
+-- recipe (an admin's gift) one is rolled from the seed, within one style.
+for id, place in FurnitureGrammar.PLACE do
+	PIECES[id] = {
+		design = true,
+		place = place.place, walls = place.walls, corner = place.corner, along = place.along, access = place.access, sleeps = place.sleeps,
+		params = function(rng, recipe)
+			return FurnitureGrammar.params(id, recipe, rng)
+		end,
+		build = function(B, c, p)
+			return FurnitureGrammar.build(id, B, c, p)
+		end,
+	}
+end
+
 Furniture.PIECES = PIECES
+Furniture.builder = builder
 
 ---------------------------------------------------------------- purposes
 
@@ -1972,15 +1990,17 @@ end
 -- piece looks the same wherever it is moved to (RoomFurniture keeps it).
 local SEED_MAX = RoomFurniture.SEED_MAX
 
--- One planner want for piece `id`, with its procedural sizes rolled.
-local function wantFor(id: string, opts: { [string]: any }?, rng: Random): any?
+-- One planner want for piece `id`, with its procedural sizes rolled
+-- (designed pieces: grown from `recipe`).
+local function wantFor(id: string, opts: { [string]: any }?, rng: Random, recipe: string?): any?
 	local piece = PIECES[id]
 	if not piece then
 		return nil
 	end
-	local p = piece.params(rng)
+	local p = piece.params(rng, recipe)
 	local w = {
 		id = id,
+		r = if piece.design then p.recipe else nil,
 		p = p,
 		w = p.w,
 		d = p.d,
@@ -2153,6 +2173,7 @@ export type GrownPiece = {
 	d: number,
 	h: number,
 	flat: boolean,
+	r: string?, -- a designed piece's recipe (FurnitureRules)
 	parts: { BasePart },
 }
 export type Grown = {
@@ -2166,13 +2187,16 @@ Furniture.grown = setmetatable({}, { __mode = "k" }) :: { [Instance]: { [number]
 Furniture.FLOOR_NAME = "RoomFloor"
 
 -- Grows one piece by itself (the decorate tools' see-through piece you
--- carry), standing on CFrame `o`, at `unit` studs per normal stud.
+-- carry, the market's preview), standing on CFrame `o`, at `unit` studs per
+-- normal stud. `id` may be an item, "kind.recipe" (RoomFurniture.item).
 function Furniture.growPiece(colors: any, id: string, seed: number, o: CFrame, unit: number, parent: Instance): (Model?, any?)
+	local recipe
+	id, recipe = RoomFurniture.splitItem(id)
 	local piece = PIECES[id]
 	if not piece then
 		return nil, nil
 	end
-	local w = wantFor(id, nil, Random.new(seed))
+	local w = wantFor(id, nil, Random.new(seed), recipe)
 	local model = Instance.new("Model")
 	model.Name = "Furniture" .. id
 	local B = builder({ model = model, colors = colors }, o, unit)
@@ -2181,9 +2205,11 @@ function Furniture.growPiece(colors: any, id: string, seed: number, o: CFrame, u
 	return model, w
 end
 
--- A piece's planner want (sizes) from its seed.
-function Furniture.wantOf(id: string, seed: number): any?
-	return wantFor(id, nil, Random.new(seed))
+-- A piece's planner want (sizes) from its seed (and recipe, for a
+-- designed piece: pass it, or an item "kind.recipe" as `id`).
+function Furniture.wantOf(id: string, seed: number, recipe: string?): any?
+	local kind, r = RoomFurniture.splitItem(id)
+	return wantFor(kind, nil, Random.new(seed), recipe or r)
 end
 
 function Furniture.furnish(ctx, frame: CFrame, room: any, keepClear: number)
@@ -2219,7 +2245,7 @@ function Furniture.furnish(ctx, frame: CFrame, room: any, keepClear: number)
 			if pause then
 				pause()
 			end
-			local w = wantFor(piece.id, nil, Random.new(piece.seed))
+			local w = wantFor(piece.id, nil, Random.new(piece.seed), piece.r)
 			if w then
 				w.seed = piece.seed
 				local lx, lz = RoomFurniture.look(piece.a)
@@ -2290,6 +2316,7 @@ function Furniture.furnish(ctx, frame: CFrame, room: any, keepClear: number)
 				d = item.want.d,
 				h = item.want.h,
 				flat = item.want.flat == true,
+				r = item.want.r,
 				parts = B.parts,
 			})
 		end
