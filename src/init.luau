@@ -32,7 +32,7 @@
 local Host = require(script.Host)
 
 local Plants = {}
-Plants.VERSION = "0.1.14"
+Plants.VERSION = "0.1.15"
 Plants.Host = Host
 Plants.features = Host.features
 

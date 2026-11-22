@@ -45,6 +45,9 @@ Procedural plants for Roblox, extracted from Plant World.
   Lights keep apart (0.1.14): floor lamps, lanterns and glow jars never
   stand under or beside a wall lamp or near another light, and each picks
   the spot furthest from the room's other lights (`RoomPlanner.LIGHTS`).
+  A drafts table always has its two matching stools, one at each end facing
+  the board, with room to get on them (0.1.15 fixed both being built inside
+  the table).
 - **RoomTidy**: suggests a better arrangement of a room's pieces by interior
   design rules (after Merrell et al. 2011, "Interactive Furniture Layout
   Using Interior Design Guidelines").
