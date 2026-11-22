@@ -52,8 +52,9 @@ RoomPlanner.GRID = 0.7 -- spacing of the spots tried out in the room
 RoomPlanner.DOOR_LANE = 1.1 -- added each side of the doorway, for the lane to the stem
 RoomPlanner.WINDOW_DEPTH = 2.4 -- how far out from a window tall pieces keep away
 RoomPlanner.LAMP_DEPTH = 2.8 -- how far out from the back wall the lamps reach
-RoomPlanner.FLOOR_PER_PIECE = 55 -- square studs of floor per standing piece, for the fill target
-RoomPlanner.FILL_REPEAT = 2 -- at most this many of one filler
+RoomPlanner.FLOOR_PER_PIECE = 24 -- square studs of floor per standing piece, for the fill target
+RoomPlanner.FILL_REPEAT = 4 -- at most this many of one filler
+RoomPlanner.FILL_MIN, RoomPlanner.FILL_MAX = 5, 24 -- standing pieces a filled room aims for
 
 local DEFAULT_WALLS = { back = 1, left = 0.9, right = 0.9, front = 0.45 }
 
@@ -484,7 +485,9 @@ function RoomPlanner.plan(room, wants, fill, rng, pause: (() -> ())?)
 	-- Fill the gaps so the room never looks bare.
 	if fill and #fill > 0 then
 		local floor = 4 * room.ax * room.az - math.pi * ring * ring
-		local target = clamp(math.floor(floor / RoomPlanner.FLOOR_PER_PIECE), 4, 12)
+		-- how full: the room's density rule (room.density, Furniture.DENSITY) scales it
+		local density = room.density or 1
+		local target = clamp(math.floor(floor * density / RoomPlanner.FLOOR_PER_PIECE), math.floor(RoomPlanner.FILL_MIN * math.min(density, 1) + 0.5), RoomPlanner.FILL_MAX)
 		local used = {}
 		local standing = 0
 		for _, p in ipairs(placed) do
@@ -493,13 +496,13 @@ function RoomPlanner.plan(room, wants, fill, rng, pause: (() -> ())?)
 			end
 		end
 		local tries = 0
-		while standing < target and tries < #fill * 2 + 4 do
+		while standing < target and tries < #fill * 4 + 14 do
 			tries = tries + 1
 			local want = fill[rng:NextInteger(1, #fill)]
 			if type(want) == "function" then
 				want = want()
 			end
-			if want and (used[want.id] or 0) < RoomPlanner.FILL_REPEAT and place(want, { 1, 0.8 }) then
+			if want and (used[want.id] or 0) < RoomPlanner.FILL_REPEAT and place(want, { 1, 0.85, 0.7 }) then
 				standing = standing + 1
 				used[want.id] = (used[want.id] or 0) + 1
 			end

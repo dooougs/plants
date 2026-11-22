@@ -1821,26 +1821,36 @@ local function W(id: string, opts: { [string]: any }?)
 	return w
 end
 
+-- How full a room grows (RoomPlanner.plan's fill target is scaled by k).
+Furniture.DENSITY = {
+	{ name = "cosy", k = 1.4 },
+	{ name = "homely", k = 1.2 },
+	{ name = "homely", k = 1.2 },
+	{ name = "tidy", k = 1 },
+	{ name = "airy", k = 0.85 },
+}
+Furniture.PUBLIC_DENSITY = 0.5
+
 Furniture.PURPOSES = {
 	bedroom = {
 		label = "Bedroom",
 		wants = { W("rug"), W("bed"), W("chest", { near = "bed", nearWeight = 1.2 }), W("shelf", { chance = 0.8 }), W("lantern"), W("desk", { chance = 0.5 }), W("cupboard", { chance = 0.35 }), W("beanbag", { chance = 0.5, near = "rug" }), W("windowBox", { chance = 0.5 }), W("dnightstand", { chance = 0.7, near = "bed", nearWeight = 1.6 }), W("dscreen", { chance = 0.25 }) },
-		fill = { "planter", "jars", "basket", "lantern" },
+		fill = { "planter", "jars", "basket", "lantern", "dnightstand", "dlamp", "shelf", "windowBox" },
 	},
 	kitchen = {
 		label = "Kitchen",
 		wants = { W("stove"), W("honeycomb"), W("rug", { chance = 0.6 }), W("table", { near = "rug", nearWeight = 1.5 }), W("barrel", { chance = 0.7 }), W("cupboard", { chance = 0.8 }), W("sideboard", { chance = 0.5 }), W("jars"), W("windowBox", { chance = 0.6 }) },
-		fill = { "jars", "basket", "barrel", "planter" },
+		fill = { "jars", "basket", "barrel", "planter", "sideboard", "stool", "honeycomb" },
 	},
 	library = {
 		label = "Library",
 		wants = { W("shelf"), W("shelf", { near = "shelf", nearWeight = 0.4 }), W("shelf", { chance = 0.7 }), W("rug"), W("armchair", { near = "rug", nearWeight = 1 }), W("desk"), W("lantern"), W("beanbag", { chance = 0.5 }) },
-		fill = { "planter", "lantern", "jars", "basket" },
+		fill = { "planter", "lantern", "jars", "basket", "shelf", "dlamp", "armchair", "beanbag" },
 	},
 	lounge = {
 		label = "Lounge",
 		wants = { W("fireplace"), W("rug", { near = "fireplace", nearWeight = 1 }), W("dsofa", { chance = 0.6, facing = "fireplace", faceDist = 5 }), W("armchair", { facing = "fireplace", faceDist = 4.5 }), W("armchair", { facing = "fireplace", faceDist = 4.5 }), W("gameTable", { chance = 0.8 }), W("sideboard", { chance = 0.6 }), W("beanbag", { chance = 0.7 }), W("lantern"), W("dscreen", { chance = 0.2 }) },
-		fill = { "planter", "lantern", "jars", "basket" },
+		fill = { "planter", "lantern", "jars", "basket", "dlamp", "shelf", "beanbag", "teacup" },
 	},
 	gardenRoom = {
 		label = "Garden Room",
@@ -2075,7 +2085,7 @@ function Furniture.plannerRoom(room: any, keepClear: number, publicRoom: boolean
 		walk = if publicRoom then 2.8 else nil,
 		doorLane = if publicRoom then 2 else nil,
 		spacing = if publicRoom then 1.8 else nil,
-		skipFill = publicRoom,
+		public = publicRoom,
 		doorHalf = room.doorHalf / u,
 		ceiling = room.height / u - 0.6,
 		windows = {
@@ -2281,6 +2291,11 @@ function Furniture.layout(purpose: string, planRoom: any, rng: Random, pause: ((
 			end
 		end
 	end
+	-- How full the room is: a rule of its own, seeded with the room (a cosy
+	-- room packs its gaps, an airy one leaves space). Public rooms fill
+	-- lightly, so their walkways stay clear (the planner keeps them anyway).
+	local rule = Furniture.DENSITY[rng:NextInteger(1, #Furniture.DENSITY)]
+	planRoom.density = rule.k * (if planRoom.public then Furniture.PUBLIC_DENSITY else 1)
 	local fill = {}
 	for _, id in (if planRoom.skipFill then {} else spec.fill or {}) do
 		table.insert(fill, function()
