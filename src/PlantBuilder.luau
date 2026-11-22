@@ -230,7 +230,10 @@ end
 --   adjust(cf, segLen, width) -> cf: optional, e.g. to keep clear of the ground
 --   each(centre, width, segLen, t): optional, called per segment
 -- Returns the CFrame at the tip.
-local function blade(ctx, name: string, cf: CFrame, len: number, segs: number, thick: number, widthAt: (number) -> number, colorAt: (number) -> Color3, material: Enum.Material, bendAt: ((number) -> number)?, adjust: ((CFrame, number, number) -> CFrame)?, each: ((CFrame, number, number, number) -> ())?, roundTip: boolean?): CFrame
+-- adjust(cf, segLen, width) may move a segment (clearing the ground) and
+-- return true as a second value to end the blade there (it would grow into
+-- a room: see steerClear).
+local function blade(ctx, name: string, cf: CFrame, len: number, segs: number, thick: number, widthAt: (number) -> number, colorAt: (number) -> Color3, material: Enum.Material, bendAt: ((number) -> number)?, adjust: ((CFrame, number, number) -> (CFrame, boolean?))?, each: ((CFrame, number, number, number) -> ())?, roundTip: boolean?): CFrame
 	local segLen = len / segs
 	local w0 = math.max(MIN, widthAt(0))
 	for j = 1, segs do
@@ -240,7 +243,11 @@ local function blade(ctx, name: string, cf: CFrame, len: number, segs: number, t
 		local t0, t1 = (j - 1) / segs, j / segs
 		local w1 = math.max(MIN, widthAt(t1))
 		if adjust then
-			cf = adjust(cf, segLen, math.max(w0, w1))
+			local stop
+			cf, stop = adjust(cf, segLen, math.max(w0, w1))
+			if stop then
+				break
+			end
 		end
 		local centre = cf * CFrame.new(0, 0, -segLen * 0.5)
 		local color = colorAt((t0 + t1) / 2)
@@ -282,7 +289,7 @@ end
 -- blocks on the rim, ruffled segments tipped up and down, and a round,
 -- pointed or notched tip. extra(centre, width, segLen, t) is called per
 -- segment, like blade's each.
-local function chainBlade(ctx, name: string, cf: CFrame, len: number, chain: Organs.Chain, maxW: number, thick: number, colorAt: (number) -> Color3, material: Enum.Material, bendAt: (number) -> number, adjust: ((CFrame, number, number) -> CFrame)?, minBase: number, extra: ((CFrame, number, number, number) -> ())?): CFrame
+local function chainBlade(ctx, name: string, cf: CFrame, len: number, chain: Organs.Chain, maxW: number, thick: number, colorAt: (number) -> Color3, material: Enum.Material, bendAt: (number) -> number, adjust: ((CFrame, number, number) -> (CFrame, boolean?))?, minBase: number, extra: ((CFrame, number, number, number) -> ())?): CFrame
 	local toks = chain.toks
 	local n = #toks
 	local tip = toks[n]
@@ -415,6 +422,67 @@ local function clearGround(ctx, cf: CFrame, piece: (CFrame) -> (CFrame, Vector3)
 	return cf + Vector3.yAxis * deficit
 end
 
+--[[
+	Other plants' rooms (options.keepOut): a leaf that would grow into one
+	turns away from it as it grows, the way a real leaf grows round an
+	obstacle, so plants can stand close together. A piece whose tip would
+	be inside a room is turned about its base, out from the room's middle
+	and a little up, a step at a time; if no turn clears it, the blade ends
+	there (a shorter leaf), and a leaf whose stalk can't clear isn't grown.
+	Boxes are in design studs round the base (run converts them).
+]]
+local KEEP_PAD = 0.25 -- design studs of air kept between a leaf and a room's walls
+local STEER_STEP = 0.22 -- radians per turn
+local STEER_TRIES = 9
+
+local function inRoom(ctx, p: Vector3): Vector3?
+	for _, b in ctx.keepOutBoxes do
+		local q = b.cf:PointToObjectSpace(p)
+		if q.Y > -KEEP_PAD and q.Y < b.top + KEEP_PAD then
+			local ex, ez = b.halfX + KEEP_PAD, b.halfZ + KEEP_PAD
+			local nx, nz = q.X / ex, q.Z / ez
+			if nx * nx + nz * nz < 1 then
+				-- the way out: away from the room's middle
+				local out = b.cf:VectorToWorldSpace(Vector3.new(nx, 0, nz))
+				if out.Magnitude < 1e-3 then
+					out = b.cf.LookVector
+				end
+				return out.Unit
+			end
+		end
+	end
+	return nil
+end
+
+-- Turn a piece starting at cf (piece(cf) -> centre CFrame, size) until its
+-- tip is out of every room. Returns the turned frame, and true when it
+-- can't be cleared (the leaf should end here).
+local function steerClear(ctx, cf: CFrame, piece: (CFrame) -> (CFrame, Vector3)): (CFrame, boolean)
+	if not ctx.keepOutBoxes then
+		return cf, false
+	end
+	if inRoom(ctx, cf.Position) then
+		return cf, true
+	end
+	for _ = 1, STEER_TRIES do
+		local centre, size = piece(cf)
+		local tip = (centre * CFrame.new(0, 0, -size.Z * 0.5)).Position
+		local away = inRoom(ctx, tip) or inRoom(ctx, centre.Position)
+		if not away then
+			return cf, false
+		end
+		local target = (away + Vector3.yAxis * 0.35).Unit
+		local axis = cf.LookVector:Cross(target)
+		if axis.Magnitude < 1e-4 then
+			axis = cf.RightVector
+		end
+		cf = CFrame.new(cf.Position) * CFrame.fromAxisAngle(axis.Unit, STEER_STEP) * cf.Rotation
+	end
+	local centre, size = piece(cf)
+	local tip = (centre * CFrame.new(0, 0, -size.Z * 0.5)).Position
+	return cf, inRoom(ctx, tip) ~= nil or inRoom(ctx, centre.Position) ~= nil
+end
+
 ----------------------------------------------------------------------------
 -- Leaves
 
@@ -441,9 +509,17 @@ local function buildLeaf(ctx, baseCF: CFrame, length: number, maturity: number, 
 	local depth = 0.25 + 0.25 * (1 - nodeT) -- lower leaves sit in more shade
 
 	local petioleW = math.max(0.07, maxW * 0.14)
-	local cf = profileGeometry(ctx, "PlantLeafClearance", clearGround, ctx, baseCF, function(c: CFrame)
-		return c * CFrame.new(0, 0, -petiole * 0.5), Vector3.new(petioleW, petioleW, petiole)
-	end)
+	local function stalk(c: CFrame): (CFrame, Vector3)
+		return c * CFrame.new(0, 0, -petiole * 0.5), Vector3.new(petioleW, petioleW, math.max(petiole, L * 0.12))
+	end
+	local cf = profileGeometry(ctx, "PlantLeafClearance", clearGround, ctx, baseCF, stalk)
+	if ctx.keepOutBoxes then
+		local blocked
+		cf, blocked = steerClear(ctx, cf, stalk)
+		if blocked then
+			return -- it would grow straight into another plant's room
+		end
+	end
 	-- The whole leaf swings where its petiole meets the stem.
 	local outerJoint = openJoint(ctx, "leaf", cf)
 	if petiole > 0 then
@@ -471,11 +547,17 @@ local function buildLeaf(ctx, baseCF: CFrame, length: number, maturity: number, 
 	local function keepBend(): number
 		return bend
 	end
-	local function lieOnGround(c: CFrame, segLen2: number, width: number): CFrame
+	local function lieOnGround(c: CFrame, segLen2: number, width: number): (CFrame, boolean?)
 		-- Near the ground the blade levels off and lies along it instead.
-		return profileGeometry(ctx, "PlantLeafClearance", clearGround, ctx, c, function(c2: CFrame)
+		local function seg(c2: CFrame): (CFrame, Vector3)
 			return c2 * CFrame.new(0, 0, -segLen2 * 0.5), Vector3.new(width, thick, segLen2 * 1.65)
-		end)
+		end
+		local c1 = profileGeometry(ctx, "PlantLeafClearance", clearGround, ctx, c, seg)
+		if ctx.keepOutBoxes then
+			-- and turns away from another plant's room
+			return steerClear(ctx, c1, seg)
+		end
+		return c1
 	end
 	if ctx.organs and vid and not sessile then
 		-- Close up, its own outline from the organ grammar, veined the way
@@ -1203,6 +1285,7 @@ local function makeContext(genome, progress: number, options, model: Model?)
 		p = p,
 		v = v,
 		plantId = options.plantId,
+		keepOut = if type(options.keepOut) == "table" and #options.keepOut > 0 then options.keepOut else nil, -- other plants' rooms, in world studs (see steerClear)
 		visualOnly = options.visualOnly == true,
 		building = options.building, -- the anchor's Building kind, if any (Furniture picks room purposes by it)
 		roomUses = Furniture.parseUses(options.roomUses), -- "0=bedroom,1=kitchen": rooms whose owner picked a purpose
@@ -1594,6 +1677,22 @@ local function run(ctx, baseCF: CFrame)
 	-- Only real builds need the ground (flowerPoints doesn't place leaves).
 	if ctx.model then
 		ctx.floor = profileGeometry(ctx, "PlantTerrain", makeFloor, baseCF)
+		-- Other plants' rooms, from world studs to design studs round the base.
+		if ctx.keepOut then
+			local bp = baseCF.Position
+			local boxes = {}
+			for _, b in ctx.keepOut do
+				if typeof(b.cf) == "CFrame" and type(b.halfX) == "number" and type(b.halfZ) == "number" and type(b.top) == "number" then
+					table.insert(boxes, {
+						cf = CFrame.new(bp + (b.cf.Position - bp) / WORLD) * b.cf.Rotation,
+						halfX = b.halfX / WORLD,
+						halfZ = b.halfZ / WORLD,
+						top = b.top / WORLD,
+					})
+				end
+			end
+			ctx.keepOutBoxes = if #boxes > 0 then boxes else nil
+		end
 	end
 	-- Building plants swell some main-stem segments into rooms (Habitat).
 	-- The whole plant bends in the wind from the ground; the renderer sways a

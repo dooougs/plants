@@ -130,6 +130,13 @@ PlantBuilder.build(genome, progress, cf, { synth = true, examples = { "fern", "l
   (`options.maxRooms`) always has a ground hall and keeps its rooms where they
   were as it grows more. A plant whose stems can't fit a whole home keeps the
   classic stem.
+- Other plants' rooms: `PlantBuilder.build(..., { keepOut = { { cf, halfX,
+  halfZ, top } } })` (world studs; `cf` at the room's floor, Y up) makes
+  leaves grow round them: a leaf heading into a room turns away from it, out
+  and up, a little at a time as it grows, ends early if it can't, and isn't
+  grown at all if its stalk can't clear. So plants can stand close to a
+  building without leaves poking through its walls. Without `keepOut`
+  nothing changes.
 - `roomStems` reads 0 in every genome string saved before it existed, and
   `Genome.fromSeed` sets it to 0, so existing and fixed buildings keep their
   rooms exactly where they are. `Genome.spreadRooms(g, seed)` turns it on
