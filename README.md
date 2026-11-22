@@ -53,7 +53,7 @@ Procedural plants for Roblox, extracted from Plant World.
 
 ```toml
 [dependencies]
-Plants = "dooougs/plants@0.1.15"
+Plants = "dooougs/plants@0.1.16"
 ```
 
 ## Use
@@ -152,6 +152,16 @@ PlantBuilder.build(genome, progress, cf, { synth = true, examples = { "fern", "l
   room's shell stay). Main stems and shoots carrying rooms never turn, so
   rooms and the top flower stay where they are. Layout takes the rooms as
   `plan.avoid` (boxes in the plant's frame); without it nothing changes.
+- Giving way to older plants: `PlantBuilder.build(..., { yieldTo = boxes })`
+  (same boxes as `keepOut`, world studs) makes a grammar plant's main stem
+  and room shoots lean out of the way of those rooms, rooms, side shoots and
+  top flower riding along, until no stem or room of it is inside one. It's
+  worked out on the grown plant a few passes over (clearing one spot can
+  push another into a room) and a pure function of genome and boxes, so pass
+  the same boxes everywhere (the game saves them with the plant when it's
+  planted). `crown`, `flowerPoints` and `groundLift` take the same option.
+  `PlantBuilder.roomBoxes(genome, baseCF, options)` gives a plant's grown
+  rooms as such boxes. Layout takes them as `plan.yield`.
 - `roomStems` reads 0 in every genome string saved before it existed, and
   `Genome.fromSeed` sets it to 0, so existing and fixed buildings keep their
   rooms exactly where they are. `Genome.spreadRooms(g, seed)` turns it on
