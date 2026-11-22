@@ -27,6 +27,8 @@
 	  window - in front of a window, looking out (a telescope, a window box);
 	  free   - out in the room, between the stem ring and the walls, facing the
 	           stem or the piece named in `facing`; `sideways` also tries a quarter turn;
+	  divider - on the line between two zones (`line`), across the room, with
+	           walkways left at its ends and between dividers;
 	and may want to be `near` another kind of piece (a chest by its bed, a
 	table on its rug). Tables bring `seats` that ring them afterwards.
 
@@ -58,6 +60,13 @@ RoomPlanner.LAMP_DEPTH = 2.8 -- how far out from the back wall the lamps reach
 -- Pieces that are lights. They never stand under or beside a wall lamp (any
 -- height), keep LIGHT_APART from each other's bodies, and like to stand
 -- far from every other light, so a room's lights spread round it.
+-- Dividers (place = "divider", line = { axis, at }): folding screens standing
+-- on the line between a room's two zones, across the room. They keep
+-- DIVIDER_END clear of the walls at each end and DIVIDER_GAP from each other,
+-- and the stem's ring and the door lane stay open, so there is always a way
+-- round them from one zone to the other.
+RoomPlanner.DIVIDER_END = 1.8
+RoomPlanner.DIVIDER_GAP = 2.2
 RoomPlanner.LIGHTS = { dlamp = true, lantern = true, jars = true }
 RoomPlanner.LIGHT_APART = 3.2 -- studs between a light piece and any other light
 RoomPlanner.LIGHT_SPREAD = 0.35 -- score per stud (up to 8) from the nearest other light
@@ -269,6 +278,16 @@ function RoomPlanner.plan(room, wants, fill, rng, pause: (() -> ())?)
 				return false
 			end
 		end
+		if want.place == "divider" then
+			if not insideRoom(room, body, RoomPlanner.DIVIDER_END) then
+				return false
+			end
+			for _, p in ipairs(placed) do
+				if p.want.place == "divider" and distanceTo(p.body, body.cx, body.cz) < RoomPlanner.DIVIDER_GAP + body.hw then
+					return false
+				end
+			end
+		end
 		if RoomPlanner.LIGHTS[want.id] then
 			for _, at in ipairs(lights) do
 				if distanceTo(body, at.x, at.z) < RoomPlanner.LIGHT_APART then
@@ -341,7 +360,23 @@ function RoomPlanner.plan(room, wants, fill, rng, pause: (() -> ())?)
 		local function add(x, z, lx, lz, score, bw, bd)
 			table.insert(out, { x = x, z = z, lx = lx, lz = lz, score = score, hw = bw or hw, hd = bd or hd })
 		end
-		if want.place == "wall" or want.place == "window" then
+		if want.place == "divider" then
+			-- along the zone line, liking the middle of each run between the
+			-- stem's ring and the wall
+			local L = want.line
+			local along = if L.axis == "x" then room.az else room.ax
+			local mid = (ring + along) / 2
+			local steps = math.floor(along / RoomPlanner.STEP)
+			for k = -steps, steps do
+				local t = k * RoomPlanner.STEP
+				local score = -math.abs(math.abs(t) - mid) * 0.3
+				if L.axis == "x" then
+					add(L.at, t, if L.flip then -1 else 1, 0, score)
+				else
+					add(t, L.at, 0, if L.flip then -1 else 1, score)
+				end
+			end
+		elseif want.place == "wall" or want.place == "window" then
 			for _, wall in ipairs(walls) do
 				local pref = prefs[wall.name] or 0
 				local windowAt = nil

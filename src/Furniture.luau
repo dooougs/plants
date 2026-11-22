@@ -1838,6 +1838,11 @@ Furniture.DENSITY = {
 	{ name = "airy", k = 0.85 },
 }
 Furniture.PUBLIC_DENSITY = 0.5
+-- Folding screens dividing a zoned room (Furniture.layout): how often, the
+-- room length (normal studs) that takes two, and the floor kept each side.
+Furniture.DIVIDE_CHANCE = 0.55
+Furniture.TWO_DIVIDERS = 15
+Furniture.DIVIDER_CLEAR = 0.7
 
 Furniture.PURPOSES = {
 	bedroom = {
@@ -2304,6 +2309,30 @@ function Furniture.layout(purpose: string, planRoom: any, rng: Random, pause: ((
 	-- lightly, so their walkways stay clear (the planner keeps them anyway).
 	local rule = Furniture.DENSITY[rng:NextInteger(1, #Furniture.DENSITY)]
 	planRoom.density = rule.k * (if planRoom.public then Furniture.PUBLIC_DENSITY else 1)
+	-- A room split into two zones (planRoom.zones, FurnitureRules.roomZones)
+	-- may be divided by folding screens standing on the line between them:
+	-- a seeded rule, one screen or (in a long enough room) two, with walkways
+	-- left round them (RoomPlanner "divider"). They go first, so the rest of
+	-- the room is planned round them.
+	local zones = planRoom.zones
+	if zones and not planRoom.public and rng:NextNumber() < Furniture.DIVIDE_CHANCE then
+		local along = if zones.axis == "x" then planRoom.az else planRoom.ax
+		local count = if along * 2 >= Furniture.TWO_DIVIDERS and rng:NextNumber() < 0.5 then 2 else 1
+		local flip = rng:NextNumber() < 0.5
+		for i = 1, count do
+			local seed = rng:NextInteger(1, SEED_MAX)
+			local w = grownWant("dscreen", nil, seed, decor)
+			if w then
+				w.seed = seed
+				w.place = "divider"
+				w.line = { axis = zones.axis, at = zones.at, flip = flip }
+				-- room to walk past it on both sides
+				w.d += 2 * Furniture.DIVIDER_CLEAR
+				w.access = 0
+				table.insert(wants, i, w)
+			end
+		end
+	end
 	local fill = {}
 	for _, id in (if planRoom.skipFill then {} else spec.fill or {}) do
 		table.insert(fill, function()
@@ -2489,10 +2518,11 @@ function Furniture.furnish(ctx, frame: CFrame, room: any, keepClear: number)
 			end
 		end
 	else
+		planRoom.zones = if decor then FurnitureRules.roomZones(ctx.decorSeed, room.number, planRoom.ax, planRoom.az, decor) else nil
 		layout = Furniture.layout(purpose :: string, planRoom, ctx.rng(6029, room.number), pause, decor)
 	end
 	if decor then
-		Furniture.zone(layout, FurnitureRules.roomZones(ctx.decorSeed, room.number, planRoom.ax, planRoom.az, decor))
+		Furniture.zone(layout, planRoom.zones or FurnitureRules.roomZones(ctx.decorSeed, room.number, planRoom.ax, planRoom.az, decor))
 	end
 	if mark then
 		mark(construction)
