@@ -42,6 +42,9 @@ Procedural plants for Roblox, extracted from Plant World.
   homely, tidy or airy (`Furniture.DENSITY`), and `RoomPlanner` fills
   toward one piece per ~24 floor units times that, keeping walkways clear.
   Public rooms fill at half that.
+  Lights keep apart (0.1.14): floor lamps, lanterns and glow jars never
+  stand under or beside a wall lamp or near another light, and each picks
+  the spot furthest from the room's other lights (`RoomPlanner.LIGHTS`).
 - **RoomTidy**: suggests a better arrangement of a room's pieces by interior
   design rules (after Merrell et al. 2011, "Interactive Furniture Layout
   Using Interior Design Guidelines").
@@ -50,7 +53,7 @@ Procedural plants for Roblox, extracted from Plant World.
 
 ```toml
 [dependencies]
-Plants = "dooougs/plants@0.1.13"
+Plants = "dooougs/plants@0.1.14"
 ```
 
 ## Use
