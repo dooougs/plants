@@ -402,6 +402,9 @@ FurnitureGrammar.PLACE = {
 	dstall = { place = "wall", corner = 0.2, access = 2.5 },
 	dcounter = { place = "wall", corner = 0.3, access = 2 },
 	dsign = { place = "free", access = 1.5 },
+	dsofa = { place = "wall", access = 1.4, corner = 0.3 },
+	dnightstand = { place = "wall", corner = 0.6, access = 0.3 },
+	dscreen = { place = "wall", corner = 0.9, access = 0.3 },
 	dpole = { place = "free", access = 0 },
 }
 
@@ -655,6 +658,136 @@ KINDS.dshelf = {
 			back(B, P, d.back, W * 0.8, p.crest, H + T, D / 2 - 0.2, 0.22 * k, true)
 		end
 		trim(B, P, d.trim, d.shape, W + 0.3, D + 0.2, H + T / 2)
+	end,
+}
+
+-- A sofa: Feet(legs) + Base + Cushions(shape) + Arms + Back(back rule) + Trim.
+-- Soft and deep, for lounges and fires; it seats one at its middle.
+KINDS.dsofa = {
+	params = function(d, s, k)
+		local W, D = 4.8 * s, 2.5
+		local seatY = 1.5
+		local backH = if d.back == 1 then 1 else 1.9 * s
+		return { w = W, d = D, h = seatY + backH + 0.2, W = W, D = D, seatY = seatY, backH = backH }
+	end,
+	build = function(B, P, d, p, k)
+		local W, D, seatY = p.W, p.D, p.seatY
+		local dia = 0.3 * k
+		local footH = 0.4
+		local spots = legSpots(1, W, D, dia * 0.7 + 0.25, if d.size == 3 then 6 else 4)
+		if d.legs == 6 then
+			B.box("SofaPlinth", W * 0.9, footH, D * 0.85, 0, footH / 2, 0, shade(P.frame, -0.2), P.frameMat, true)
+		else
+			legs(B, P, d.legs, spots, 0, footH, dia * 1.2, D)
+		end
+		local round = if d.shape == 1 or d.shape == 6 then 0.1 elseif d.shape == 2 then 0.3 else 0.5
+		local baseH = seatY - footH - 0.4
+		B.slab("SofaBase", W, baseH, D, 0, footH + baseH / 2, 0, P.top, P.topMat, true, round)
+		-- the cushions: two or three across, in the shape rule's outline
+		local n = if d.size == 3 then 3 else 2
+		local arm = 0.5 + (k - 1) * 0.15
+		local cw = (W - 2 * arm) / n
+		local up = CFrame.Angles(math.pi / 2, 0, 0)
+		for i = 0, n - 1 do
+			local x = -W / 2 + arm + cw * (i + 0.5)
+			if d.shape == 4 then
+				B.egg("SofaCushion", cw * 1.02, 0.46, D * 0.82, x, seatY - 0.2, -0.12, P.cloth, FABRIC)
+			elseif d.shape == 5 then
+				B.slab("SofaCushion", cw - 0.06, 0.42, D * 0.78, x, seatY - 0.2, -0.12, if i % 2 == 0 then P.cloth else shade(P.cloth, 0.12), FABRIC, true, math.min(cw, D) * 0.4)
+			else
+				B.slab("SofaCushion", cw - 0.06, 0.42, D * 0.78, x, seatY - 0.2, -0.12, P.cloth, FABRIC, true, round * 0.7)
+			end
+			B.slab("SofaBackCushion", cw - 0.1, 0.5, p.backH * 0.8, x, seatY + p.backH * 0.4, D / 2 - 0.45, shade(P.cloth, -0.06), FABRIC, false, 0.25, up)
+		end
+		-- the arms
+		local armH = 0.85
+		for _, sx in { -1, 1 } do
+			B.slab("SofaArm", arm, armH, D, sx * (W / 2 - arm / 2), seatY - 0.4 + armH / 2, 0, P.top, P.topMat, true, math.min(arm, armH) * 0.45)
+		end
+		-- the frame behind, in the back rule (none: a plain low back)
+		if d.back == 1 then
+			B.slab("SofaBack", W, p.backH, 0.4, 0, seatY - 0.4 + p.backH / 2 + 0.2, D / 2 - 0.2, P.top, P.topMat, true, 0.15)
+		else
+			B.slab("SofaBack", W, p.backH * 0.7, 0.35, 0, seatY - 0.4 + p.backH * 0.35 + 0.2, D / 2 - 0.18, P.top, P.topMat, true, 0.12)
+			back(B, P, d.back, W * 0.96, p.backH, seatY, D / 2 - 0.05, dia)
+		end
+		trim(B, P, d.trim, 1, W, D, footH + baseH, spots, d.legs, 0, footH, nil, true)
+	end,
+}
+
+-- A bedside table: Legs + Body(drawer) + Top(shape) + Trim. Small, by a bed.
+KINDS.dnightstand = {
+	params = function(d, s, k)
+		local W, D, H = 1.8 * s, 1.6, 2.3
+		return { w = W + 0.2, d = D + 0.2, h = H + 0.2, W = W, D = D, H = H }
+	end,
+	build = function(B, P, d, p, k)
+		local W, D, H = p.W, p.D, p.H
+		local t = 0.14 * k + 0.06
+		local dia = 0.22 * k
+		local legH = 0.7
+		local spots = legSpots(1, W, D, dia * 0.6 + 0.12, 4)
+		if d.legs == 6 then
+			legs(B, P, 6, {}, 0, legH, dia, math.min(W, D) * 0.8)
+		else
+			legs(B, P, d.legs, spots, 0, legH, dia, D)
+		end
+		local bodyH = H - t - legH
+		B.box("StandBody", W - 0.1, bodyH, D - 0.1, 0, legH + bodyH / 2, 0, P.frame, P.frameMat, true)
+		B.box("StandDrawer", W - 0.4, bodyH * 0.55, 0.06, 0, legH + bodyH * 0.6, -D / 2 + 0.02, shade(P.top, -0.06), P.topMat)
+		B.ball("StandKnob", 0.18, 0, legH + bodyH * 0.6, -D / 2 - 0.06, P.trim, SMOOTH)
+		top(B, "StandTop", d.shape, W + 0.2, D + 0.2, t, H - t / 2, P.top, P.topMat)
+		trim(B, P, d.trim, d.shape, W + 0.2, D + 0.2, H - t / 2, spots, d.legs, 0, legH, nil, true)
+	end,
+}
+
+-- A folding screen: Frame(legs rule posts) + Panels(cloth) + Tops(shape) + Trim.
+-- Three or four panels folded in a zigzag; it shares off a corner of a room.
+KINDS.dscreen = {
+	params = function(d, s, k)
+		local n = if d.size == 3 then 4 else 3
+		local pw = 1.5 * (if d.size == 1 then 0.9 else 1)
+		local H = 4.8
+		return { w = n * pw * 0.95, d = 1.3, h = H + 0.6, n = n, pw = pw, H = H }
+	end,
+	build = function(B, P, d, p, k)
+		local n, pw, H = p.n, p.pw, p.H
+		local dia = 0.2 * k
+		local fold = 0.42
+		local step = pw * math.cos(fold)
+		local x0 = -step * n / 2
+		local edges = {}
+		for i = 0, n - 1 do
+			local yaw = if i % 2 == 0 then fold else -fold
+			local cx = x0 + step * (i + 0.5)
+			local rot = CFrame.Angles(0, yaw, 0)
+			B.box("ScreenPanel", pw - dia, H - 0.7, 0.08, cx, 0.35 + (H - 0.7) / 2, 0, if i % 2 == 0 then P.cloth else shade(P.cloth, 0.1), FABRIC, true, rot)
+			local cf = CFrame.new(cx, 0, 0) * rot
+			local a = cf * Vector3.new(-pw / 2, 0, 0)
+			local b = cf * Vector3.new(pw / 2, 0, 0)
+			if i == 0 then
+				table.insert(edges, Vector3.new(a.X, 0, a.Z))
+			end
+			table.insert(edges, Vector3.new(b.X, 0, b.Z))
+			-- each panel's top, in the shape rule
+			local ty = H - 0.25
+			local col, mat = P.top, P.topMat
+			if d.shape == 1 or d.shape == 6 then
+				B.box("ScreenTop", pw, 0.22, 0.16, cx, ty, 0, col, mat, false, rot)
+			elseif d.shape == 2 or d.shape == 3 then
+				B.egg("ScreenTop", pw * 0.95, 0.7, 0.14, cx, ty + 0.1, 0, col, mat, rot)
+			elseif d.shape == 4 then
+				B.egg("ScreenTop", pw * 0.7, 1, 0.1, cx, ty + 0.3, 0, P.leaf, M.leaf, rot * CFrame.Angles(0, 0, 0.3))
+			else
+				for j = -1, 1 do
+					B.egg("ScreenTop", 0.5, 0.7, 0.1, cx + j * pw * 0.28 * math.cos(yaw), ty + 0.2, -j * pw * 0.28 * math.sin(yaw), if j == 0 then P.trim else col, M.petal, rot)
+				end
+			end
+			B.box("ScreenRail", pw, 0.12, 0.12, cx, 0.32, 0, col, mat, false, rot)
+		end
+		-- the frame: a post at every fold, in the legs rule
+		legs(B, P, if d.legs == 6 then 2 else d.legs, edges, 0, H, dia, 1)
+		trim(B, P, d.trim, 1, step * n, 0.3, H - 0.1, nil, nil, nil, nil, nil, true)
 	end,
 }
 
