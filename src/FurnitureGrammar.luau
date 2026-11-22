@@ -901,30 +901,192 @@ KINDS.dcounter = {
 	end,
 }
 
+-- A sign board's outline in its own plane (x across, dy up from its middle),
+-- by the shape rule: how far up and down it reaches (H) and how wide it is
+-- at each height (half). The sign's other rules read it so that nothing
+-- they add sticks out past the board or crosses the panel written on.
+local function signOutline(shape: number, W: number, bh: number): (number, (number) -> number)
+	local function ellipse(a: number, b: number, dy: number): number
+		local q = dy / b
+		return if math.abs(q) >= 1 then 0 else a * math.sqrt(1 - q * q)
+	end
+	local function rounded(w: number, h: number, r: number, dy: number): number
+		local rr = math.min(r, w / 2 - 0.01, h / 2 - 0.01)
+		local e = math.abs(dy) - (h / 2 - rr)
+		if math.abs(dy) > h / 2 then
+			return 0
+		end
+		return if e <= 0 then w / 2 else w / 2 - rr + math.sqrt(math.max(rr * rr - e * e, 0))
+	end
+	if shape == 1 then
+		return bh / 2 + 0.1, function(dy)
+			return if math.abs(dy) <= bh / 2 + 0.1 then W / 2 else 0
+		end
+	elseif shape == 2 then
+		return bh / 2, function(dy)
+			return rounded(W, bh, math.min(W, bh) * 0.3, dy)
+		end
+	elseif shape == 3 or shape == 4 then
+		local a, b = if shape == 3 then W * 0.54 else W * 0.56, if shape == 3 then bh * 0.575 else bh * 0.55
+		return b, function(dy)
+			local box = if math.abs(dy) <= bh * 0.35 then W * 0.35 else 0
+			return math.max(box, ellipse(a, b, dy))
+		end
+	elseif shape == 5 then
+		return bh * 0.45, function(dy)
+			return rounded(W * 0.92, bh * 0.9, math.min(W, bh) * 0.35, dy)
+		end
+	end
+	local R = bh / SQRT3
+	local tip = 0.72 * R / math.sqrt(2) -- the corner squares' half diagonal
+	return bh / 2, function(dy)
+		if math.abs(dy) > bh / 2 then
+			return 0
+		end
+		return math.max((W - R) / 2, W / 2 - R / 2 + tip - math.abs(dy))
+	end
+end
+
+-- Points every `spacing` round a sign's outline (see signOutline), each with
+-- its outward normal, starting at the bottom middle.
+local function signRim(H: number, half: (number) -> number, cy: number, spacing: number): { { p: Vector2, n: Vector2 } }
+	local loop = {}
+	local STEPS = 48
+	for i = 0, STEPS do -- up the right side
+		local dy = H * math.sin(-math.pi / 2 + math.pi * i / STEPS)
+		table.insert(loop, Vector2.new(half(dy * 0.999), dy))
+	end
+	for i = STEPS, 0, -1 do -- down the left side
+		local dy = H * math.sin(-math.pi / 2 + math.pi * i / STEPS)
+		table.insert(loop, Vector2.new(-half(dy * 0.999), dy))
+	end
+	table.insert(loop, loop[1])
+	local per = 0
+	for i = 2, #loop do
+		per += (loop[i] - loop[i - 1]).Magnitude
+	end
+	local n = math.max(6, math.floor(per / spacing))
+	local step = per / n
+	local out = {}
+	local walked, want = 0, step / 2
+	for i = 2, #loop do
+		local a, b = loop[i - 1], loop[i]
+		local len = (b - a).Magnitude
+		while len > 1e-6 and want <= walked + len and #out < n do
+			local q = a:Lerp(b, (want - walked) / len)
+			local dir = (b - a) / len
+			-- anticlockwise round the loop, so outward is the tangent turned right
+			local nrm = Vector2.new(dir.Y, -dir.X)
+			table.insert(out, { p = Vector2.new(q.X, q.Y + cy), n = nrm })
+			want += step
+		end
+		walked += len
+	end
+	return out
+end
+
+-- A sign's ornament (the trim rule) round its board's rim, standing just
+-- outside the outline so it shows from both sides, and kept off the face
+-- (fx, fy, fw, fh: the panel written on, with a margin) and the topper.
+local function signTrim(B, P, g: number, rim: { { p: Vector2, n: Vector2 } }, t: number, keep: (Vector2, number) -> boolean)
+	if g == 1 then
+		return
+	end
+	local prev: Vector3? = nil
+	for i, q in rim do
+		local p, nrm = q.p, q.n
+		local a = math.atan2(nrm.Y, nrm.X)
+		local function at(out: number): Vector2
+			return p + nrm * out
+		end
+		if g == 2 then
+			-- a ring of little petals, each pointing out from the rim
+			local c = at(0.16)
+			if keep(c, 0.3) then
+				B.egg("SignTrimPetal", 0.5, 0.3, t + 0.08, c.X, c.Y, 0, if i % 2 == 0 then P.trim else shade(P.trim, 0.2), M.petal, CFrame.Angles(0, 0, a))
+			end
+		elseif g == 3 then
+			-- dots along the edge
+			local c = at(0.1)
+			if i % 2 == 0 and keep(c, 0.2) then
+				B.ball("SignTrimDot", math.min(t + 0.06, 0.4), c.X, c.Y, 0, P.trim, SMOOTH)
+			end
+		elseif g == 4 then
+			-- a vine round the edge, with a leaf every third step
+			local c = at(0.05)
+			local here = Vector3.new(c.X, c.Y, 0)
+			if keep(c, 0.12) then
+				if prev and (here - prev).Magnitude < 1.5 then
+					B.rod("SignTrimVine", prev, here, 0.1, P.leaf, M.stem)
+				end
+				if i % 3 == 0 then
+					local l = at(0.2)
+					B.egg("SignTrimLeaf", 0.44, 0.24, t * 0.6, l.X, l.Y, 0, P.leaf, M.leaf, CFrame.Angles(0, 0, a + 0.4))
+				end
+				prev = here
+			else
+				prev = nil
+			end
+		elseif g == 5 then
+			-- honey dripping off the underside only, so it never runs over the writing
+			if nrm.Y < -0.5 then
+				local len = 0.18 + ((i * 37) % 5) * 0.07
+				local c = at(0)
+				if keep(Vector2.new(c.X, c.Y - len / 2), 0.15) then
+					B.cyl("SignTrimDrip", 0.14, c.X, c.Y - len, c.Y + 0.05, 0, P.trim, SMOOTH)
+					B.ball("SignTrimDrip", 0.2, c.X, c.Y - len, 0, P.trim, SMOOTH)
+				end
+			end
+		else
+			-- little glowing beads along the edge
+			local c = at(0.08)
+			if i % 2 == 0 and keep(c, 0.15) then
+				B.ball("SignTrimBead", math.min(t, 0.3), c.X, c.Y, 0, P.glow, M.habitatGlow)
+			end
+		end
+	end
+end
+
 -- A sign: Posts(legs) + Board(shape) + Topper(back rule) + Trim.
 -- Town notice boards, the Town Bed's sign, building signposts. The board
--- faces the front (-Z); `face` is a flat panel on it for writing on.
+-- faces the front (-Z); `face` is a flat panel on it for writing on, and
+-- `back` the same panel on the far side. Every rule reads the board's
+-- outline (signOutline): the face fits inside it, the posts stop where they
+-- meet it, the topper stands on its top and the trim runs round its rim,
+-- clear of the face, so nothing covers the writing or sticks out oddly.
 KINDS.dsign = {
 	params = function(d, s, k)
 		local W = 6 * s
 		local boardH = W * 0.55
 		local postH = 3.6
 		local crest = if d.back == 1 then 0 else 1.3
-		return { w = W + 0.4, d = 1.2, h = postH + boardH + crest + 0.3, W = W, boardH = boardH, postH = postH, crest = crest }
+		local H = signOutline(d.shape, W, boardH)
+		return { w = W + 1, d = 1.2, h = postH + boardH / 2 + H + crest + 0.5, W = W, boardH = boardH, postH = postH, crest = crest }
 	end,
 	build = function(B, P, d, p, k, n)
 		local W, bh, ph = p.W, p.boardH, p.postH
 		local t = 0.3 + 0.08 * k
-		local dia = 0.34 * k
+		-- posts no thicker than the board, so they run hidden inside it
+		local dia = math.min(0.34 * k, t - 0.04)
 		local cy = ph + bh / 2
 		local topY = ph + bh
+		local H, half = signOutline(d.shape, W, bh)
+		local postX = W / 2 - 0.45
 		-- posts: two up the board's sides, or one pedestal under it
 		if d.legs == 6 then
-			legs(B, P, 6, {}, 0, ph, dia, 1.8)
+			legs(B, P, 6, {}, 0, cy - H + 0.15, dia, 1.8)
 		else
-			B.cyl("SignFoot", dia * 2.2, -(W / 2 - 0.45), 0, 0.16, 0, shade(P.frame, -0.15), P.frameMat, true)
-			B.cyl("SignFoot", dia * 2.2, W / 2 - 0.45, 0, 0.16, 0, shade(P.frame, -0.15), P.frameMat, true)
-			legs(B, P, d.legs, { Vector3.new(-(W / 2 - 0.45), 0, 0.12), Vector3.new(W / 2 - 0.45, 0, 0.12) }, 0, topY - 0.2, dia, 1)
+			-- each post stops where it has gone well into the board
+			local reach = 0
+			for i = 0, 40 do
+				local dy = (bh / 2 - 0.2) * i / 40
+				if half(dy) >= postX + dia / 2 + 0.1 then
+					reach = dy
+				end
+			end
+			B.cyl("SignFoot", dia * 2.2, -postX, 0, 0.16, 0, shade(P.frame, -0.15), P.frameMat, true)
+			B.cyl("SignFoot", dia * 2.2, postX, 0, 0.16, 0, shade(P.frame, -0.15), P.frameMat, true)
+			legs(B, P, d.legs, { Vector3.new(-postX, 0, 0), Vector3.new(postX, 0, 0) }, 0, cy + reach, dia, 1)
 		end
 		-- the board, in the shape rule's outline
 		local col, mat = P.top, P.topMat
@@ -940,13 +1102,20 @@ KINDS.dsign = {
 			B.box("SignBoard", W * 0.7, bh * 0.7, t * 0.9, 0, cy, 0, col, mat, true)
 			B.egg("SignBoard", W * 1.08, bh * 1.15, t, 0, cy, 0, col, mat)
 		elseif d.shape == 4 then
-			-- a leaf, its tip to one side, with a midrib and veins
+			-- a leaf, with a midrib and veins kept inside its outline
 			B.box("SignBoard", W * 0.7, bh * 0.7, t * 0.9, 0, cy, 0, col, mat, true)
 			B.egg("SignBoard", W * 1.12, bh * 1.1, t, 0, cy, 0, col, mat)
 			local rib = shade(col, 0.3)
-			B.box("SignBoardRib", W * 0.98, 0.1, t + 0.04, 0, cy - bh * 0.42, 0, rib, mat)
+			local ry = -bh * 0.4
+			local rw = 2 * half(ry) - 0.5
+			if rw > 0.5 then
+				B.box("SignBoardRib", rw, 0.1, t + 0.04, 0, cy + ry, 0, rib, mat)
+			end
 			for i = -1, 1 do
-				B.box("SignBoardVein", bh * 0.3, 0.08, t + 0.04, i * W * 0.25, cy - bh * 0.32, 0, rib, mat, false, CFrame.Angles(0, 0, 0.7))
+				local vx = i * W * 0.22
+				if math.abs(vx) + 0.6 < half(-bh * 0.32) then
+					B.box("SignBoardVein", bh * 0.24, 0.08, t + 0.04, vx, cy - bh * 0.32, 0, rib, mat, false, CFrame.Angles(0, 0, 0.7))
+				end
 			end
 		elseif d.shape == 5 then
 			-- a scalloped flower edge round a soft board
@@ -955,7 +1124,7 @@ KINDS.dsign = {
 			for i = 0, count - 1 do
 				local a = i / count * TAU
 				local px, py = math.cos(a) * W * 0.47, math.sin(a) * bh * 0.47
-				B.egg("SignBoardPetal", 0.9, 0.7, t * 0.8, px, cy + py, 0.04, if i % 2 == 0 then col else shade(col, 0.15), mat, CFrame.Angles(0, 0, a))
+				B.egg("SignBoardPetal", 0.9, 0.7, t * 0.8, px, cy + py, 0, if i % 2 == 0 then col else shade(col, 0.15), mat, CFrame.Angles(0, 0, a))
 			end
 		else
 			-- a hexagonal board: pointed at both ends
@@ -966,17 +1135,51 @@ KINDS.dsign = {
 				B.box("SignBoard", R * 0.72, R * 0.72, t * 0.98, x, cy, 0, col, mat, false, CFrame.Angles(0, 0, math.pi / 4))
 			end
 		end
-		-- the panel written on, a little in front of the board
+		-- the panel written on: as big as fits inside the outline with a
+		-- margin, a little in front of the board, and its twin on the back
+		local margin = 0.25
 		local fw, fh = W * 0.8, bh * 0.68
-		local from = #B.parts
-		B.box("SignFace", fw, fh, 0.06, 0, cy, -t / 2 - 0.04, shade(col, 0.32), SMOOTH)
-		local face = B.parts[from + 1]
-		-- the topper: the back rule standing on the board
-		if p.crest > 0 then
-			back(B, P, d.back, W * 0.7, p.crest, topY - 0.05, 0.05, dia * 0.7, true)
+		-- (and clear of the posts' bulbs and rings where they cross the board)
+		local clear = if d.legs == 6 then math.huge else postX - dia * 0.8 - 0.1
+		for _ = 1, 24 do
+			if fw / 2 <= half(fh / 2) - margin and fw / 2 <= half(-fh / 2) - margin and fw / 2 <= clear then
+				break
+			end
+			fw *= 0.96
+			fh *= 0.985
 		end
-		trim(B, P, d.trim, 1, W, t + 0.1, topY, nil, nil, nil, nil, nil, true)
-		return { face = face, faceW = fw, faceH = fh, topY = topY }
+		local faceCol = shade(col, 0.32)
+		local fz = t / 2 + 0.06
+		local from = #B.parts
+		B.box("SignFace", fw, fh, 0.06, 0, cy, -fz, faceCol, SMOOTH)
+		local face = B.parts[from + 1]
+		B.box("SignFaceBack", fw, fh, 0.06, 0, cy, fz, faceCol, SMOOTH, false, CFrame.Angles(0, math.pi, 0))
+		local backFace = B.parts[from + 2]
+		-- the topper: the back rule standing on the board's top
+		local boardTop = cy + H
+		local tw = W * 0.7
+		if p.crest > 0 then
+			-- a narrow top (an oval's) carries a narrower topper
+			tw = math.min(tw, math.max(2 * half(H - 0.25) + 0.6, W * 0.4))
+			back(B, P, d.back, tw, p.crest, boardTop - 0.12, 0, dia * 0.7, true)
+		end
+		-- the trim round the rim, off the face and out from under the topper
+		local fx0, fx1 = -fw / 2 - 0.15, fw / 2 + 0.15
+		local fy0, fy1 = cy - fh / 2 - 0.15, cy + fh / 2 + 0.15
+		local function keep(c: Vector2, r: number): boolean
+			if c.X + r > fx0 and c.X - r < fx1 and c.Y + r > fy0 and c.Y - r < fy1 then
+				return false
+			end
+			if p.crest > 0 and math.abs(c.X) < tw / 2 + r and c.Y > boardTop - 0.6 then
+				return false
+			end
+			if d.legs ~= 6 and math.abs(math.abs(c.X) - postX) < dia / 2 + r and c.Y < cy then
+				return false
+			end
+			return true
+		end
+		signTrim(B, P, d.trim, signRim(H, half, cy, 0.6), t, keep)
+		return { face = face, back = backFace, faceW = fw, faceH = fh, topY = boardTop }
 	end,
 }
 
