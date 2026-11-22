@@ -1301,6 +1301,8 @@ local function makeContext(genome, progress: number, options, model: Model?)
 		decorSeed = if type(options.decorSeed) == "number" then options.decorSeed else nil, -- a town's decor style (FurnitureRules.groupStyle): grown rooms of non-homes grow designed pieces in it
 		maxRooms = if type(options.maxRooms) == "number" then math.clamp(math.floor(options.maxRooms), 1, 5) else nil, -- a home's room count (Shared.Housing.Homes)
 		roomFurniture = if type(options.roomFurniture) == "table" then options.roomFurniture else nil, -- rooms their owner arranged: room -> pieces (Shared.Housing.RoomFurniture)
+		-- the plant's shown model: rooms it already has, built the same way, are copied from it (Habitat.build)
+		reuseRooms = if typeof(options.reuseRooms) == "Instance" then options.reuseRooms else nil,
 		flowers = {},
 		joints = {},
 		jointOf = {},
@@ -2016,6 +2018,12 @@ function PlantBuilder.build(genome, progress: number, baseCFrame: CFrame, option
 		local started = os.clock()
 		model:ScaleTo(WORLD)
 		Perf.measure("PlantScale", started)
+	end
+	if ctx.reusedRooms and ctx.reuseRooms then
+		-- rooms kept from the shown model go in now, at world scale
+		local started = os.clock()
+		Habitat.transplant(ctx, model, ctx.reuseRooms, if type(opts.restOf) == "function" then opts.restOf else nil)
+		Perf.measure("PlantRoomsKept", started)
 	end
 	if breathe then
 		breathe()

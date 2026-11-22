@@ -2441,6 +2441,7 @@ export type Grown = {
 	decorSeed: number?,
 	building: string?,
 	beds: number?, -- beds grown so far (SleepBed numbers)
+	furnSig: string?, -- what its furniture was grown from (Furniture.furnSig), kept up by refurnish
 }
 Furniture.grown = setmetatable({}, { __mode = "k" }) :: { [Instance]: { [number]: Grown } }
 Furniture.FLOOR_NAME = "RoomFloor"
@@ -2669,6 +2670,7 @@ function Furniture.furnish(ctx, frame: CFrame, room: any, keepClear: number)
 			room = { number = room.number, unit = room.unit, floorY = room.floorY },
 			decorSeed = ctx.decorSeed,
 			building = ctx.building,
+			furnSig = Furniture.furnSig(ctx, room.number),
 		}
 		local rooms = Furniture.grown[ctx.model] or {}
 		rooms[room.number] = grown :: Grown
@@ -2777,7 +2779,111 @@ function Furniture.refurnish(model: Instance, roomNumber: number, arranged: { an
 	grown.pieces = pieces
 	grown.arranged = true
 	grown.beds = beds.n
+	grown.furnSig = "a:" .. Furniture.piecesSig(arranged)
 	return out
+end
+
+---------------------------------------------------------------- keeping rooms
+-- (Habitat.build / Habitat.transplant copy a room from the shown model
+-- into a new build of the same plant instead of building it again.)
+
+-- An arrangement (RoomFurniture pieces) as text.
+function Furniture.piecesSig(pieces: { any }): string
+	local out = table.create(#pieces)
+	for i, p in pieces do
+		out[i] = string.format("%s:%.1f:%.1f:%d:%.2f:%d:%s:%s", tostring(p.id), p.x or 0, p.z or 0, math.floor((p.a or 0) + 0.5), p.s or 1, p.seed or 0, tostring(p.key), tostring(p.r))
+	end
+	return table.concat(out, ";")
+end
+
+-- What a build will grow room `n`'s furniture from: its owner's
+-- arrangement, or its own grown layout (the rest is in Habitat.signature).
+function Furniture.furnSig(ctx, n: number): string
+	local arranged = ctx.roomFurniture and ctx.roomFurniture[n]
+	return if arranged then "a:" .. Furniture.piecesSig(arranged) else "grown"
+end
+
+-- The same for room `n` of a built model, as it stands now.
+function Furniture.furnSigOf(model: Instance, n: number): string
+	local rooms = Furniture.grown[model]
+	local g = rooms and rooms[n]
+	return if g and g.furnSig then g.furnSig else "grown"
+end
+
+-- A home room's furniture parts (pieces, their handles, its floor), as a set.
+function Furniture.partsOf(model: Instance, n: number): { [Instance]: boolean }
+	local set = {}
+	local rooms = Furniture.grown[model]
+	local g = rooms and rooms[n]
+	if g then
+		set[g.floor] = true
+		for _, piece in g.pieces do
+			for _, part in piece.parts do
+				set[part] = true
+			end
+			for _, h in piece.handles or {} do
+				set[h] = true
+			end
+		end
+	end
+	return set
+end
+
+-- Copies a home room's furniture record from `old` to `model`, its parts
+-- made by `copy` (which clones a part into the new model, or gives nil).
+function Furniture.copyRoom(old: Instance, model: Instance, n: number, copy: (BasePart?) -> BasePart?)
+	local rooms = Furniture.grown[old]
+	local g = rooms and rooms[n]
+	if not g then
+		return
+	end
+	local floor = copy(g.floor)
+	if not floor then
+		return
+	end
+	local new = table.clone(g)
+	new.floor = floor
+	new.pieces = {}
+	for _, piece in g.pieces do
+		local np = table.clone(piece)
+		np.parts = {}
+		for _, part in piece.parts do
+			local c = copy(part)
+			if c then
+				table.insert(np.parts, c)
+			end
+		end
+		np.handles = {}
+		for _, h in piece.handles or {} do
+			local c = copy(h)
+			if c then
+				table.insert(np.handles, c)
+			end
+		end
+		table.insert(new.pieces, np)
+	end
+	local to = Furniture.grown[model] or {}
+	to[n] = new :: Grown
+	Furniture.grown[model] = to
+end
+
+-- A copied handle does what the original did, with the copied parts.
+function Furniture.copyHandle(from: Instance, h: BasePart, map: { [Instance]: BasePart })
+	local info = Furniture.handles[from]
+	if not info then
+		return
+	end
+	local parts = {}
+	for _, part in info.parts do
+		local c = map[part]
+		if c then
+			table.insert(parts, c)
+		end
+	end
+	Furniture.handles[h] = { kind = info.kind, parts = parts }
+	h.Destroying:Connect(function()
+		Furniture.handles[h] = nil
+	end)
 end
 
 return Furniture
