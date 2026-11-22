@@ -71,6 +71,9 @@ FurnitureRules.KINDS = {
 	dbed = { name = "Bed", icon = "🛏️", uses = { legs = true, shape = true, back = true, trim = true, weight = true, size = true, colour = true }, price = 34 },
 	dlamp = { name = "Floor Lamp", icon = "🏮", uses = { legs = true, shape = true, trim = true, weight = true, size = true, colour = true }, price = 14 },
 	dshelf = { name = "Bookcase", icon = "📚", uses = { legs = true, shape = true, back = true, trim = true, weight = true, size = true, colour = true }, price = 28 },
+	dsofa = { name = "Sofa", icon = "🛋️", uses = { legs = true, shape = true, back = true, trim = true, weight = true, size = true, colour = true }, price = 26 },
+	dnightstand = { name = "Bedside Table", icon = "🗄️", uses = { legs = true, shape = true, trim = true, weight = true, size = true, colour = true }, price = 12 },
+	dscreen = { name = "Folding Screen", icon = "🎐", uses = { legs = true, shape = true, trim = true, weight = true, size = true, colour = true }, price = 16 },
 	-- building furniture (not sold): market stalls and counters, grown in
 	-- their town's style by the buildings themselves
 	dstall = { name = "Market Stall", icon = "⛺", uses = { legs = true, shape = true, back = true, trim = true, weight = true, size = true, colour = true }, civic = true },
@@ -79,7 +82,7 @@ FurnitureRules.KINDS = {
 	dsign = { name = "Sign", icon = "🪧", uses = { legs = true, shape = true, back = true, trim = true, weight = true, size = true, colour = true }, civic = true },
 	dpole = { name = "Pole", icon = "🎏", uses = { legs = true, shape = true, back = true, trim = true, weight = true, size = true, colour = true }, civic = true },
 }
-FurnitureRules.ORDER = { "dchair", "dtable", "dstool", "dbench", "dbed", "dlamp", "dshelf" }
+FurnitureRules.ORDER = { "dchair", "dtable", "dstool", "dbench", "dsofa", "dbed", "dnightstand", "dlamp", "dshelf", "dscreen" }
 
 -- Every other grown piece (Shared.Plants.Furniture) can be bought dressed in
 -- a style too (FurnitureGrammar.dress): its own body in the style's
@@ -131,6 +134,9 @@ FurnitureRules.PART_NAMES = {
 	dstall = { shape = "Awning", back = "Backboard" },
 	dcounter = { legs = "Feet", back = "Front" },
 	dsign = { legs = "Posts", shape = "Board", back = "Topper" },
+	dsofa = { legs = "Feet", shape = "Cushions" },
+	dnightstand = { shape = "Top" },
+	dscreen = { legs = "Frame", shape = "Tops" },
 	dpole = { legs = "Pole", shape = "Finial", back = "Arm" },
 }
 
@@ -204,8 +210,84 @@ FurnitureRules.STYLES = {
 			{ name = "Berry", frame = { 120, 60, 80 }, top = { 200, 72, 102 }, cloth = { 250, 202, 212 }, trim = { 122, 62, 162 }, leaf = { 90, 150, 90 }, glow = { 255, 210, 230 }, frameMat = "wood", topMat = "smooth" },
 		},
 	},
+	-- styles added after Mix & Match keep every saved recipe's style number
+	{
+		id = "acorn", name = "Acorn Lodge", icon = "🌰",
+		blurb = "Turned legs, round tops, spindle backs, dots",
+		allow = { legs = { 2, 1 }, shape = { 2, 3 }, back = { 3, 6, 2 }, trim = { 3, 1 }, weight = { 3, 2 }, size = { 2, 1, 3 }, colour = { 2, 3, 1 } },
+		palettes = {
+			{ name = "Toasted acorn", frame = { 122, 78, 44 }, top = { 176, 118, 64 }, cloth = { 236, 206, 160 }, trim = { 246, 226, 186 }, leaf = { 110, 150, 70 }, glow = { 255, 214, 140 }, frameMat = "wood", topMat = "wood" },
+			{ name = "Cap and cup", frame = { 92, 74, 52 }, top = { 196, 160, 104 }, cloth = { 150, 112, 72 }, trim = { 232, 196, 120 }, leaf = { 100, 140, 70 }, glow = { 255, 226, 160 }, frameMat = "wood", topMat = "planks" },
+		},
+	},
+	{
+		id = "fern", name = "Fern Grotto", icon = "🌿",
+		blurb = "Reeds and twigs, leaf shapes, leaf backs, vines",
+		allow = { legs = { 5, 4 }, shape = { 4, 2 }, back = { 5, 2 }, trim = { 4, 1 }, weight = { 1, 2 }, size = { 2, 1, 3 }, colour = { 2, 3, 1 } },
+		palettes = {
+			{ name = "Fern", frame = { 70, 110, 64 }, top = { 104, 166, 90 }, cloth = { 206, 232, 180 }, trim = { 160, 210, 120 }, leaf = { 70, 150, 70 }, glow = { 220, 255, 190 }, frameMat = "smooth", topMat = "smooth" },
+			{ name = "Moss", frame = { 96, 92, 58 }, top = { 132, 150, 80 }, cloth = { 220, 214, 170 }, trim = { 186, 160, 92 }, leaf = { 110, 140, 60 }, glow = { 240, 240, 170 }, frameMat = "wood", topMat = "smooth" },
+		},
+	},
+	{
+		id = "beetle", name = "Beetle Shell", icon = "🪲",
+		blurb = "Square and turned legs, round and hex tops, arches, glossy dots",
+		allow = { legs = { 1, 2 }, shape = { 3, 6 }, back = { 6, 1 }, trim = { 3, 6, 1 }, weight = { 2, 3 }, size = { 2, 1, 3 }, colour = { 2, 3, 1 } },
+		palettes = {
+			{ name = "Jewel beetle", frame = { 36, 78, 70 }, top = { 40, 150, 122 }, cloth = { 180, 232, 210 }, trim = { 120, 226, 180 }, leaf = { 70, 160, 110 }, glow = { 170, 255, 220 }, frameMat = "smooth", topMat = "smooth" },
+			{ name = "Ladybird", frame = { 46, 40, 44 }, top = { 214, 52, 48 }, cloth = { 250, 226, 214 }, trim = { 40, 36, 40 }, leaf = { 90, 150, 80 }, glow = { 255, 214, 170 }, frameMat = "smooth", topMat = "smooth" },
+		},
+	},
+	{
+		id = "dew", name = "Dewdrop", icon = "💧",
+		blurb = "Pedestals and stalks, round tops, arches, glowing beads",
+		allow = { legs = { 6, 3 }, shape = { 3, 2 }, back = { 6, 4, 1 }, trim = { 6, 3 }, weight = { 1 }, size = { 2, 1, 3 }, colour = { 2, 3, 1 } },
+		palettes = {
+			{ name = "Morning dew", frame = { 176, 214, 224 }, top = { 200, 236, 244 }, cloth = { 240, 252, 255 }, trim = { 150, 220, 240 }, leaf = { 130, 200, 180 }, glow = { 210, 248, 255 }, frameMat = "smooth", topMat = "smooth" },
+			{ name = "Rain", frame = { 96, 128, 160 }, top = { 140, 178, 210 }, cloth = { 214, 230, 246 }, trim = { 240, 246, 255 }, leaf = { 110, 170, 160 }, glow = { 220, 240, 255 }, frameMat = "smooth", topMat = "smooth" },
+		},
+	},
+	{
+		id = "thistle", name = "Thistledown", icon = "🌾",
+		blurb = "Reeds and turned legs, scalloped tops, petal fans, petal skirts",
+		allow = { legs = { 5, 2 }, shape = { 5, 3 }, back = { 4, 3 }, trim = { 2, 1 }, weight = { 1, 2 }, size = { 2, 1, 3 }, colour = { 2, 3, 1 } },
+		palettes = {
+			{ name = "Thistle", frame = { 104, 86, 124 }, top = { 176, 132, 206 }, cloth = { 248, 240, 252 }, trim = { 214, 170, 236 }, leaf = { 120, 160, 110 }, glow = { 250, 230, 255 }, frameMat = "smooth", topMat = "smooth" },
+			{ name = "Dandelion", frame = { 150, 130, 70 }, top = { 255, 214, 70 }, cloth = { 255, 250, 226 }, trim = { 255, 236, 150 }, leaf = { 120, 170, 80 }, glow = { 255, 244, 180 }, frameMat = "wood", topMat = "smooth" },
+		},
+	},
+	{
+		id = "pebble", name = "Pebble Brook", icon = "🪨",
+		blurb = "Pedestals and posts, soft round tops, plain or arched, a few dots",
+		allow = { legs = { 6, 1 }, shape = { 2, 3 }, back = { 1, 6 }, trim = { 1, 3 }, weight = { 3, 2 }, size = { 2, 1, 3 }, colour = { 2, 3, 1 } },
+		palettes = {
+			{ name = "Riverstone", frame = { 122, 128, 134 }, top = { 176, 182, 186 }, cloth = { 226, 222, 210 }, trim = { 110, 170, 190 }, leaf = { 110, 150, 110 }, glow = { 230, 240, 240 }, frameMat = "smooth", topMat = "smooth" },
+			{ name = "Sandstone", frame = { 170, 130, 96 }, top = { 222, 190, 150 }, cloth = { 244, 230, 206 }, trim = { 196, 120, 86 }, leaf = { 120, 150, 90 }, glow = { 255, 226, 180 }, frameMat = "smooth", topMat = "smooth" },
+		},
+	},
+	{
+		id = "ember", name = "Ember Hearth", icon = "🔥",
+		blurb = "Square posts and pedestals, hex tops, spindles, glowing beads",
+		allow = { legs = { 1, 6 }, shape = { 6, 1 }, back = { 3, 6 }, trim = { 6, 5 }, weight = { 3, 2 }, size = { 2, 1, 3 }, colour = { 2, 3, 1 } },
+		palettes = {
+			{ name = "Charcoal", frame = { 54, 46, 46 }, top = { 92, 72, 64 }, cloth = { 232, 150, 90 }, trim = { 255, 130, 60 }, leaf = { 120, 110, 60 }, glow = { 255, 160, 80 }, frameMat = "wood", topMat = "smooth" },
+			{ name = "Copper", frame = { 150, 84, 52 }, top = { 204, 124, 76 }, cloth = { 250, 212, 170 }, trim = { 255, 196, 110 }, leaf = { 120, 140, 70 }, glow = { 255, 200, 120 }, frameMat = "smooth", topMat = "smooth" },
+		},
+	},
 }
-FurnitureRules.MIX = #FurnitureRules.STYLES
+-- Mix & Match stays the 7th, so recipes saved before more styles came keep theirs.
+FurnitureRules.MIX = 7
+-- The styles a town, a room or a rolled piece picks from (all but Mix & Match),
+-- and the order the designer shows them in (Mix & Match last).
+FurnitureRules.PICKS = {}
+FurnitureRules.STYLE_ORDER = {}
+for i = 1, #FurnitureRules.STYLES do
+	if i ~= FurnitureRules.MIX then
+		table.insert(FurnitureRules.PICKS, i)
+		table.insert(FurnitureRules.STYLE_ORDER, i)
+	end
+end
+table.insert(FurnitureRules.STYLE_ORDER, FurnitureRules.MIX)
 
 ---------------------------------------------------------------- recipes
 
@@ -299,7 +381,7 @@ end
 -- A design rolled from a number generator `next(lo, hi)` (an integer in
 -- lo..hi), keeping to one style: for pieces with no recipe of their own.
 function FurnitureRules.roll(next: (number, number) -> number): Design
-	local style = next(1, FurnitureRules.MIX - 1)
+	local style = FurnitureRules.PICKS[next(1, #FurnitureRules.PICKS)]
 	local s = FurnitureRules.STYLES[style]
 	local d: any = { style = style }
 	for _, g in FurnitureRules.GENES do
@@ -339,7 +421,7 @@ end
 function FurnitureRules.groupStyle(seed: number): Group
 	local next = lcg(seed * 7 + 13)
 	next(1, 2) -- stir
-	local style = next(1, FurnitureRules.MIX - 1)
+	local style = FurnitureRules.PICKS[next(1, #FurnitureRules.PICKS)]
 	local s = FurnitureRules.STYLES[style]
 	return {
 		style = style,
@@ -409,8 +491,9 @@ end
 -- leader must be.
 FurnitureRules.SETS = {
 	{ leaders = { dtable = true, table = true, roundTable = true, gameTable = true, desk = true }, followers = { dchair = true, dstool = true, stool = true, dbench = true, bench = true, armchair = true, beanbag = true }, reach = 5 },
-	{ leaders = { dbed = true, bed = true, bunk = true, mossbed = true }, followers = { chest = true, dlamp = true, lantern = true, basket = true }, reach = 4.5 },
-	{ leaders = { fireplace = true, stove = true }, followers = { armchair = true, dchair = true, rug = true, beanbag = true }, reach = 6 },
+	{ leaders = { dbed = true, bed = true, bunk = true, mossbed = true }, followers = { chest = true, dlamp = true, lantern = true, basket = true, dnightstand = true }, reach = 4.5 },
+	{ leaders = { fireplace = true, stove = true }, followers = { armchair = true, dchair = true, dsofa = true, rug = true, beanbag = true }, reach = 6 },
+	{ leaders = { dsofa = true }, followers = { armchair = true, dchair = true, beanbag = true, dtable = true }, reach = 5 },
 	{ leaders = { dshelf = true, shelf = true }, followers = { dshelf = true, shelf = true, desk = true }, reach = 4.5 },
 }
 

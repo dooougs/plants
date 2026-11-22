@@ -169,6 +169,7 @@ FurnitureUse.KINDS = {
 	dchair = { action = "sit", object = "Chair", text = "Sit" },
 	dstool = { action = "sit", object = "Stool", text = "Sit" },
 	dbench = { action = "sit", object = "Bench", text = "Sit" },
+	dsofa = { action = "sit", object = "Sofa", text = "Sit" },
 	dlamp = { action = "light", object = "Lamp", text = "Turn off", textOff = "Turn on", glow = { "LampBulb" } },
 	dshelf = { action = "read", object = "Bookcase", text = "Read a book" },
 } :: { [string]: Kind }
@@ -189,6 +190,7 @@ FurnitureUse.SEATS = {
 	dchair = function(p) return Vector3.new(0, p.seatY + 0.15, -0.1) end,
 	dstool = function(p) return Vector3.new(0, p.seatY + 0.2, 0) end,
 	dbench = function(p) return Vector3.new(0, p.seatY + 0.15, -0.05) end,
+	dsofa = function(p) return Vector3.new(0, p.seatY + 0.1, -0.15) end,
 } :: { [string]: (any) -> Vector3 | CFrame }
 
 -- Where a telescope's lens is and which way it looks, in its own frame.

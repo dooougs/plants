@@ -1824,7 +1824,7 @@ end
 Furniture.PURPOSES = {
 	bedroom = {
 		label = "Bedroom",
-		wants = { W("rug"), W("bed"), W("chest", { near = "bed", nearWeight = 1.2 }), W("shelf", { chance = 0.8 }), W("lantern"), W("desk", { chance = 0.5 }), W("cupboard", { chance = 0.35 }), W("beanbag", { chance = 0.5, near = "rug" }), W("windowBox", { chance = 0.5 }) },
+		wants = { W("rug"), W("bed"), W("chest", { near = "bed", nearWeight = 1.2 }), W("shelf", { chance = 0.8 }), W("lantern"), W("desk", { chance = 0.5 }), W("cupboard", { chance = 0.35 }), W("beanbag", { chance = 0.5, near = "rug" }), W("windowBox", { chance = 0.5 }), W("dnightstand", { chance = 0.7, near = "bed", nearWeight = 1.6 }), W("dscreen", { chance = 0.25 }) },
 		fill = { "planter", "jars", "basket", "lantern" },
 	},
 	kitchen = {
@@ -1839,7 +1839,7 @@ Furniture.PURPOSES = {
 	},
 	lounge = {
 		label = "Lounge",
-		wants = { W("fireplace"), W("rug", { near = "fireplace", nearWeight = 1 }), W("armchair", { facing = "fireplace", faceDist = 4.5 }), W("armchair", { facing = "fireplace", faceDist = 4.5 }), W("gameTable", { chance = 0.8 }), W("sideboard", { chance = 0.6 }), W("beanbag", { chance = 0.7 }), W("lantern") },
+		wants = { W("fireplace"), W("rug", { near = "fireplace", nearWeight = 1 }), W("dsofa", { chance = 0.6, facing = "fireplace", faceDist = 5 }), W("armchair", { facing = "fireplace", faceDist = 4.5 }), W("armchair", { facing = "fireplace", faceDist = 4.5 }), W("gameTable", { chance = 0.8 }), W("sideboard", { chance = 0.6 }), W("beanbag", { chance = 0.7 }), W("lantern"), W("dscreen", { chance = 0.2 }) },
 		fill = { "planter", "lantern", "jars", "basket" },
 	},
 	gardenRoom = {

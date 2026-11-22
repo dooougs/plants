@@ -14,8 +14,8 @@ Procedural plants for Roblox, extracted from Plant World.
 - **Rooms**: plants with the habitat gene grow walk-in rooms (**Habitat**)
   that **furnish** themselves, with usable furniture (**FurnitureUse**),
   lamps, a drafts board, and owner arrangements (**RoomFurniture**).
-- **Designed furniture**: chairs, stools, tables, benches, beds, lamps and
-  bookcases grown by a small shape grammar (**FurnitureGrammar**) from a
+- **Designed furniture**: chairs, stools, tables, benches, sofas, beds,
+  bedside tables, lamps, bookcases and folding screens grown by a small shape grammar (**FurnitureGrammar**) from a
   short recipe of rule choices (legs, shape, back, trim, weight, size,
   colour), with **decor styles** that keep a set matching
   (**FurnitureRules**, after Liu et al. 2015, "Style Compatibility for 3D
@@ -35,6 +35,9 @@ Procedural plants for Roblox, extracted from Plant World.
   together (a table and its chairs, a bed and its bedside chest, a fire and
   its armchairs: `FurnitureRules.SETS`) always match. All of it is seeded
   from the building, so every client agrees.
+  There are 13 decor styles plus Mix & Match (Acorn Lodge, Fern Grotto,
+  Beetle Shell, Dewdrop, Thistledown, Pebble Brook and Ember Hearth came in
+  0.1.12, after Mix & Match so saved recipes keep their style).
 - **RoomTidy**: suggests a better arrangement of a room's pieces by interior
   design rules (after Merrell et al. 2011, "Interactive Furniture Layout
   Using Interior Design Guidelines").
@@ -43,7 +46,7 @@ Procedural plants for Roblox, extracted from Plant World.
 
 ```toml
 [dependencies]
-Plants = "dooougs/plants@0.1.10"
+Plants = "dooougs/plants@0.1.12"
 ```
 
 ## Use
