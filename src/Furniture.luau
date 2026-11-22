@@ -2049,6 +2049,7 @@ local function wantFor(id: string, opts: { [string]: any }?, rng: Random, recipe
 	local w = {
 		id = id,
 		r = if piece.design then p.recipe else nil,
+		recipe = recipe, -- what it was grown or dressed from (Furniture.refurnish tells pieces apart by it)
 		p = p,
 		w = p.w,
 		d = p.d,
@@ -2426,6 +2427,8 @@ export type GrownPiece = {
 	flat: boolean,
 	r: string?, -- a designed piece's recipe (FurnitureRules)
 	parts: { BasePart },
+	handles: { BasePart }?, -- its FurnitureUse handles (seats, lids...)
+	look: string?, -- what it was grown from besides where it stands (Furniture.refurnish)
 }
 export type Grown = {
 	floor: BasePart, -- invisible, on the room's floor: its CFrame is the room's floor frame
@@ -2433,6 +2436,11 @@ export type Grown = {
 	colors: any, -- the building's colours, to grow a piece the same way
 	arranged: boolean, -- laid out by its owner (RoomFurniture), not grown by itself
 	pieces: { GrownPiece },
+	-- what Furniture.refurnish needs to grow pieces into this room later
+	room: any?, -- { number, unit, floorY }
+	decorSeed: number?,
+	building: string?,
+	beds: number?, -- beds grown so far (SleepBed numbers)
 }
 Furniture.grown = setmetatable({}, { __mode = "k" }) :: { [Instance]: { [number]: Grown } }
 Furniture.FLOOR_NAME = "RoomFloor"
@@ -2461,6 +2469,135 @@ end
 function Furniture.wantOf(id: string, seed: number, recipe: string?): any?
 	local kind, r = RoomFurniture.splitItem(id)
 	return wantFor(kind, nil, Random.new(seed), recipe or r)
+end
+
+-- What a laid-out piece is grown from besides where it stands and which
+-- way it faces: two pieces with the same look are the same piece moved.
+local function lookOf(item: any): string
+	local w = item.want
+	return string.format("%s|%s|%s|%s|%s|%s", tostring(w.id), tostring(w.seed), tostring(item.s), tostring(w.r or w.recipe), tostring(w.fromStyle), tostring(item.focus))
+end
+
+-- Grows one laid-out piece (item, the k-th) into a room: its parts, its
+-- handles and beds, and (homes) its record in `grown`.
+-- Where a round seat (a rug, a moss bed) in this layout has you look: the
+-- room's fire if it has one. Each round seat notes it in its look, so it
+-- is grown again (facing the fire) when the fire moves.
+local function focusOf(layout: { any }, frame: CFrame, room: any): Vector3?
+	local u = room.unit
+	local focus: Vector3? = nil
+	for _, item in layout do
+		if FOCUS[item.want.id] then
+			focus = (frame * CFrame.new(item.x * u, room.floorY, item.z * u)).Position
+			break
+		end
+	end
+	for _, item in layout do
+		if ROUND_SEATS[item.want.id] and focus then
+			local f = (frame:PointToObjectSpace(focus :: Vector3)) / u
+			item.focus = string.format("%d,%d", math.floor(f.X * 10 + 0.5), math.floor(f.Z * 10 + 0.5))
+		end
+	end
+	return focus
+end
+
+-- An owner's own arrangement (Shared.Housing.RoomFurniture) as a layout:
+-- designed pieces keep their own recipe, grown ones are dressed in the
+-- room's style (same sizes and places, so nothing moves).
+local function arrangedLayout(arranged: { any }, decor: any?, pause: (() -> ())?): { any }
+	local layout = {}
+	for _, piece in arranged do
+		if pause then
+			pause()
+		end
+		local recipe = piece.r
+		local own = PIECES[piece.id]
+		if not recipe and decor and own and not own.design then
+			recipe = FurnitureRules.groupRecipe(decor, piece.id, piece.seed)
+		end
+		local w = wantFor(piece.id, nil, Random.new(piece.seed), recipe)
+		if w then
+			w.seed = piece.seed
+			w.fromStyle = recipe ~= nil and piece.r == nil
+			local lx, lz = RoomFurniture.look(piece.a)
+			table.insert(layout, { want = w, x = piece.x, z = piece.z, lx = lx, lz = lz, s = piece.s, key = piece.key })
+		end
+	end
+	return layout
+end
+
+local function growItem(ctx, frame: CFrame, room: any, grown: Grown?, item: any, k: number, focus: Vector3?, beds: { n: number })
+	local u = room.unit
+	local piece = PIECES[item.want.id]
+	local pos = Vector3.new(item.x * u, room.floorY, item.z * u)
+	local o = frame * CFrame.lookAt(pos, pos + Vector3.new(item.lx, 0, item.lz))
+	local uu = u * item.s
+	local B = builder(ctx, o, uu, true)
+	local p = item.want.p
+	local seed = item.want.seed or k
+	local made = piece.build(B, ctx.colors, p, Random.new(seed * 7 + 3))
+	local key = item.key or tostring(k)
+	local handles: { BasePart } = {}
+	local record: GrownPiece = {
+		id = item.want.id,
+		x = item.x,
+		z = item.z,
+		a = RoomFurniture.angleOf(item.lx, item.lz),
+		s = item.s,
+		seed = seed,
+		key = key,
+		w = item.want.w,
+		d = item.want.d,
+		h = item.want.h,
+		flat = item.want.flat == true,
+		r = item.want.r,
+		parts = B.parts,
+		handles = handles,
+		look = lookOf(item),
+	}
+	if grown then
+		table.insert(grown.pieces, record)
+	end
+	if piece.sleeps and type(made) == "table" then
+		for _, mattress in made do
+			beds.n += 1
+			mattress:SetAttribute("SleepRoom", room.number)
+			mattress:SetAttribute("SleepBed", beds.n)
+			CollectionService:AddTag(mattress, Furniture.SLEEP_TAG)
+		end
+	end
+	local kind = item.want.id
+	if kind == "gameTable" then
+		local stool = p.stool
+		for _, inSet in made do
+			local z = inSet.z
+			local at = (FurnitureUse.SEATS.stool(stool) + Vector3.new(0, 0, z)) * uu
+			local seat = o * CFrame.lookAt(at, at + Vector3.new(0, 0, -math.sign(z)))
+			local center = o * CFrame.new(0, stool.h / 2 * uu, z * uu)
+			table.insert(handles, Furniture.addHandle(ctx, "stool", room.number, key, center, Vector3.new(stool.w, stool.h, stool.d) * uu, inSet.parts, { Seat = seat }) :: any)
+		end
+	end
+	if FurnitureUse.KINDS[kind] then
+		local points = {}
+		local seat = FurnitureUse.SEATS[kind]
+		if seat then
+			local at = seat(p)
+			points.Seat = if typeof(at) == "CFrame" then o * CFrame.new(at.Position * uu) * at.Rotation else o * CFrame.new((at :: Vector3) * uu)
+			if ROUND_SEATS[kind] and focus then
+				local sp = points.Seat.Position
+				local flat = Vector3.new(focus.X, sp.Y, focus.Z)
+				if (flat - sp).Magnitude > 1e-3 then
+					points.Seat = CFrame.lookAt(sp, flat, o.UpVector)
+				end
+			end
+		end
+		if kind == "telescope" then
+			local eye = FurnitureUse.telescopeEye(p)
+			points.Eye = o * CFrame.new(eye.Position * uu) * eye.Rotation
+		end
+		table.insert(handles, Furniture.addHandle(ctx, kind, room.number, key, o * CFrame.new(0, p.h / 2 * uu, 0), Vector3.new(p.w, p.h, p.d) * uu, B.parts, points) :: any)
+	end
+	return record
 end
 
 function Furniture.furnish(ctx, frame: CFrame, room: any, keepClear: number)
@@ -2496,27 +2633,7 @@ function Furniture.furnish(ctx, frame: CFrame, room: any, keepClear: number)
 	-- and a big room may be split into zones in two styles (Furniture.zone).
 	local decor = if ctx.decorSeed then FurnitureRules.roomStyle(ctx.decorSeed, room.number) else nil
 	if arranged then
-		-- its owner's own arrangement (Shared.Housing.RoomFurniture): designed
-		-- pieces keep their own recipe, grown ones are dressed in the home's
-		-- style (same sizes and places, so nothing moves)
-		layout = {}
-		for _, piece in arranged do
-			if pause then
-				pause()
-			end
-			local recipe = piece.r
-			local own = PIECES[piece.id]
-			if not recipe and decor and own and not own.design then
-				recipe = FurnitureRules.groupRecipe(decor, piece.id, piece.seed)
-			end
-			local w = wantFor(piece.id, nil, Random.new(piece.seed), recipe)
-			if w then
-				w.seed = piece.seed
-				w.fromStyle = recipe ~= nil and piece.r == nil
-				local lx, lz = RoomFurniture.look(piece.a)
-				table.insert(layout, { want = w, x = piece.x, z = piece.z, lx = lx, lz = lz, s = piece.s, key = piece.key })
-			end
-		end
+		layout = arrangedLayout(arranged, decor, pause)
 	else
 		planRoom.zones = if decor then FurnitureRules.roomZones(ctx.decorSeed, room.number, planRoom.ax, planRoom.az, decor) else nil
 		layout = Furniture.layout(purpose :: string, planRoom, ctx.rng(6029, room.number), pause, decor)
@@ -2543,94 +2660,124 @@ function Furniture.furnish(ctx, frame: CFrame, room: any, keepClear: number)
 		floor.CFrame = frame * CFrame.new(0, room.floorY, 0)
 		floor:SetAttribute("FurnitureRoom", room.number)
 		floor.Parent = ctx.model
-		grown = { floor = floor, plan = planRoom, colors = ctx.colors, arranged = arranged ~= nil, pieces = {} }
+		grown = {
+			floor = floor,
+			plan = planRoom,
+			colors = ctx.colors,
+			arranged = arranged ~= nil,
+			pieces = {},
+			room = { number = room.number, unit = room.unit, floorY = room.floorY },
+			decorSeed = ctx.decorSeed,
+			building = ctx.building,
+		}
 		local rooms = Furniture.grown[ctx.model] or {}
 		rooms[room.number] = grown :: Grown
 		Furniture.grown[ctx.model] = rooms
 	end
 
-	local beds = 0
-	-- Where a round seat (a rug, a moss bed) has you look: the room's fire
-	-- if it has one, otherwise the way the piece was laid.
-	local focus: Vector3? = nil
-	for _, item in layout do
-		if FOCUS[item.want.id] then
-			focus = (frame * CFrame.new(item.x * u, room.floorY, item.z * u)).Position
-			break
-		end
-	end
+	local beds = { n = 0 }
+	local focus = focusOf(layout, frame, room)
 	for k, item in layout do
 		if pause then
 			pause()
 		end
-		local piece = PIECES[item.want.id]
-		local pos = Vector3.new(item.x * u, room.floorY, item.z * u)
-		local o = frame * CFrame.lookAt(pos, pos + Vector3.new(item.lx, 0, item.lz))
-		local uu = u * item.s
-		local B = builder(ctx, o, uu, true)
-		local p = item.want.p
-		local seed = item.want.seed or k
-		local made = piece.build(B, ctx.colors, p, Random.new(seed * 7 + 3))
-		local key = item.key or tostring(k)
-		if grown then
-			table.insert(grown.pieces, {
-				id = item.want.id,
-				x = item.x,
-				z = item.z,
-				a = RoomFurniture.angleOf(item.lx, item.lz),
-				s = item.s,
-				seed = seed,
-				key = key,
-				w = item.want.w,
-				d = item.want.d,
-				h = item.want.h,
-				flat = item.want.flat == true,
-				r = item.want.r,
-				parts = B.parts,
-			})
-		end
-		if piece.sleeps and type(made) == "table" then
-			for _, mattress in made do
-				beds += 1
-				mattress:SetAttribute("SleepRoom", room.number)
-				mattress:SetAttribute("SleepBed", beds)
-				CollectionService:AddTag(mattress, Furniture.SLEEP_TAG)
-			end
-		end
-		local kind = item.want.id
-		if kind == "gameTable" then
-			local stool = p.stool
-			for _, inSet in made do
-				local z = inSet.z
-				local at = (FurnitureUse.SEATS.stool(stool) + Vector3.new(0, 0, z)) * uu
-				local seat = o * CFrame.lookAt(at, at + Vector3.new(0, 0, -math.sign(z)))
-				local center = o * CFrame.new(0, stool.h / 2 * uu, z * uu)
-				Furniture.addHandle(ctx, "stool", room.number, key, center, Vector3.new(stool.w, stool.h, stool.d) * uu, inSet.parts, { Seat = seat })
-			end
-		end
-		if FurnitureUse.KINDS[kind] then
-			local points = {}
-			local seat = FurnitureUse.SEATS[kind]
-			if seat then
-				local at = seat(p)
-				points.Seat = if typeof(at) == "CFrame" then o * CFrame.new(at.Position * uu) * at.Rotation else o * CFrame.new((at :: Vector3) * uu)
-				if ROUND_SEATS[kind] and focus then
-					local sp = points.Seat.Position
-					local flat = Vector3.new(focus.X, sp.Y, focus.Z)
-					if (flat - sp).Magnitude > 1e-3 then
-						points.Seat = CFrame.lookAt(sp, flat, o.UpVector)
-					end
-				end
-			end
-			if kind == "telescope" then
-				local eye = FurnitureUse.telescopeEye(p)
-				points.Eye = o * CFrame.new(eye.Position * uu) * eye.Rotation
-			end
-			Furniture.addHandle(ctx, kind, room.number, key, o * CFrame.new(0, p.h / 2 * uu, 0), Vector3.new(p.w, p.h, p.d) * uu, B.parts, points)
-		end
+		growItem(ctx, frame, room, grown, item, k, focus, beds)
+	end
+	if grown then
+		grown.beds = beds.n
 	end
 
 	ctx.joint, ctx.stemGroup = savedJoint, savedStem
+end
+
+export type Refurnished = {
+	added: { BasePart }, -- new parts, at their rest pose
+	moved: { [BasePart]: CFrame }, -- parts that moved, and their new rest pose
+	removed: { BasePart }, -- parts destroyed
+}
+
+--[[
+	Re-arranges one room of a home already grown on this client, in place,
+	after its owner moved, turned, planted or dug up pieces (RoomFurniture):
+	a piece that only moved or turned is moved, a new or changed one is
+	grown, a gone one is destroyed. Nothing else of the plant (its stem,
+	leaves, rooms, other pieces) is touched, so no unions are made.
+
+	`restOf(part)` gives a part's rest pose (the plant may be mid-sway).
+	Returns what changed, for the renderer's sway lists, or nil if this room
+	wasn't grown here with a record (then rebuild the plant instead).
+]]
+function Furniture.refurnish(model: Instance, roomNumber: number, arranged: { any }, restOf: (BasePart) -> CFrame): Refurnished?
+	local rooms = Furniture.grown[model]
+	local grown = rooms and rooms[roomNumber]
+	if not grown or not grown.room or not grown.floor.Parent then
+		return nil
+	end
+	local room = grown.room
+	local u = room.unit
+	local frame = restOf(grown.floor) * CFrame.new(0, -room.floorY, 0)
+	local decor = if grown.decorSeed then FurnitureRules.roomStyle(grown.decorSeed, roomNumber) else nil
+	local layout = arrangedLayout(arranged, decor, nil)
+	if decor then
+		Furniture.zone(layout, FurnitureRules.roomZones(grown.decorSeed, roomNumber, grown.plan.ax, grown.plan.az, decor))
+	end
+	local focus = focusOf(layout, frame, room)
+
+	local out: Refurnished = { added = {}, moved = {}, removed = {} }
+	local byKey: { [string]: GrownPiece } = {}
+	for _, old in grown.pieces do
+		byKey[old.key] = old
+	end
+	local ctx = { model = model, colors = grown.colors, building = grown.building, decorSeed = grown.decorSeed, made = 0 }
+	local beds = { n = grown.beds or 0 }
+	local function pose(x: number, z: number, a: number): CFrame
+		local lx, lz = RoomFurniture.look(a)
+		local pos = Vector3.new(x * u, room.floorY, z * u)
+		return frame * CFrame.lookAt(pos, pos + Vector3.new(lx, 0, lz))
+	end
+	local pieces: { GrownPiece } = {}
+	for k, item in layout do
+		local key = item.key or tostring(k)
+		local old = byKey[key]
+		local a = RoomFurniture.angleOf(item.lx, item.lz)
+		if old and old.look == lookOf(item) then
+			byKey[key] = nil
+			if old.x ~= item.x or old.z ~= item.z or old.a ~= a then
+				-- the same piece, moved or turned: carry its parts over
+				local shift = pose(item.x, item.z, a) * pose(old.x, old.z, old.a):Inverse()
+				for _, list in { old.parts, old.handles or {} } do
+					for _, part in list do
+						if part.Parent then
+							out.moved[part] = shift * restOf(part)
+							part.CFrame = shift * part.CFrame
+						end
+					end
+				end
+				old.x, old.z, old.a = item.x, item.z, a
+			end
+			table.insert(pieces, old)
+		else
+			local record = growItem(ctx, frame, room, nil, item, k, focus, beds)
+			for _, list in { record.parts, record.handles or {} } do
+				for _, part in list do
+					table.insert(out.added, part)
+				end
+			end
+			table.insert(pieces, record)
+		end
+	end
+	for _, old in byKey do
+		for _, list in { old.parts, old.handles or {} } do
+			for _, part in list do
+				table.insert(out.removed, part)
+				part:Destroy()
+			end
+		end
+	end
+	grown.pieces = pieces
+	grown.arranged = true
+	grown.beds = beds.n
+	return out
 end
 
 return Furniture
