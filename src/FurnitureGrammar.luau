@@ -588,7 +588,24 @@ KINDS.dlamp = {
 		local sw = 1.6 + (k - 1) * 0.3
 		local col, mat = P.top, P.topMat
 		if d.shape == 1 then
-			B.box("LampShade", sw, 0.9, sw, 0, sy + 0.2, 0, col, mat)
+			-- a square shade: four panels leaning in to a narrow top, open
+			-- below so the bulb glows out of it, a band round its hem and a
+			-- knob on top (not a solid box, which read as a sign on a post)
+			local a, b, ht = sw / 2, sw * 0.3, 0.95
+			local y0 = H - 0.25
+			local lean = math.atan((a - b) / ht)
+			local slant = math.sqrt(ht * ht + (a - b) ^ 2)
+			for i = 0, 3 do
+				local yaw = i * TAU / 4
+				local r = (a + b) / 2
+				B.box("LampShade", 0.08, slant, a + b + 0.06, math.cos(yaw) * r, y0 + ht / 2, -math.sin(yaw) * r, if i % 2 == 0 then col else shade(col, 0.08), mat, false, CFrame.Angles(0, yaw, 0) * CFrame.Angles(0, 0, lean))
+			end
+			B.box("LampShadeTop", b * 2 + 0.06, 0.08, b * 2 + 0.06, 0, y0 + ht, 0, shade(col, -0.1), mat)
+			B.ball("LampFinial", 0.24, 0, y0 + ht + 0.14, 0, shade(P.frame, 0.1), P.frameMat)
+			for i = 0, 3 do
+				local yaw = i * TAU / 4
+				B.box("LampShadeRim", 0.1, 0.1, a * 2 + 0.12, math.cos(yaw) * (a + 0.02), y0 + 0.05, -math.sin(yaw) * (a + 0.02), shade(col, -0.2), mat, false, CFrame.Angles(0, yaw, 0))
+			end
 		elseif d.shape == 2 then
 			B.cyl("LampShade", sw, 0, sy - 0.2, sy + 0.4, 0, col, mat)
 			B.egg("LampShade", sw, 0.5, sw, 0, sy + 0.4, 0, shade(col, 0.1), mat)

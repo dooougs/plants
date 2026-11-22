@@ -10,7 +10,10 @@
 	    can always step off the stem onto the floor and grab it again;
 	  - a lane from the stem out through the door;
 	  - the windows clear of anything taller than their sills, and the wall
-	    lamps clear of tall pieces.
+	    lamps clear of tall pieces;
+	  - lights apart: a floor lamp, lantern or glow jars never stands under or
+	    beside a wall lamp, nor close to another light, and each likes the
+	    spot furthest from the room's other lights (LIGHTS).
 
 	Every piece is a rectangle on the floor (its footprint) with a front, and
 	most want some open floor in front of them (their access: room to get into
@@ -52,6 +55,12 @@ RoomPlanner.GRID = 0.7 -- spacing of the spots tried out in the room
 RoomPlanner.DOOR_LANE = 1.1 -- added each side of the doorway, for the lane to the stem
 RoomPlanner.WINDOW_DEPTH = 2.4 -- how far out from a window tall pieces keep away
 RoomPlanner.LAMP_DEPTH = 2.8 -- how far out from the back wall the lamps reach
+-- Pieces that are lights. They never stand under or beside a wall lamp (any
+-- height), keep LIGHT_APART from each other's bodies, and like to stand
+-- far from every other light, so a room's lights spread round it.
+RoomPlanner.LIGHTS = { dlamp = true, lantern = true, jars = true }
+RoomPlanner.LIGHT_APART = 3.2 -- studs between a light piece and any other light
+RoomPlanner.LIGHT_SPREAD = 0.35 -- score per stud (up to 8) from the nearest other light
 RoomPlanner.FLOOR_PER_PIECE = 24 -- square studs of floor per standing piece, for the fill target
 RoomPlanner.FILL_REPEAT = 4 -- at most this many of one filler
 RoomPlanner.FILL_MIN, RoomPlanner.FILL_MAX = 5, 24 -- standing pieces a filled room aims for
@@ -222,6 +231,11 @@ function RoomPlanner.plan(room, wants, fill, rng, pause: (() -> ())?)
 	local walls = wallsOf(room)
 	local placed = {}
 	local layout = {}
+	-- where the room's lights are: the wall lamps' bulbs, then each light piece placed
+	local lights = {}
+	for _, l in ipairs(room.lamps or {}) do
+		table.insert(lights, { x = -room.ax + 1.6, z = l.z })
+	end
 
 	local function valid(want, body, access, s, host)
 		if want.h * s > room.ceiling then
@@ -253,6 +267,13 @@ function RoomPlanner.plan(room, wants, fill, rng, pause: (() -> ())?)
 		for _, z in ipairs(zones) do
 			if want.h * s > z.maxH and not (want.place == "window" and z.window) and overlaps(body, z.box) then
 				return false
+			end
+		end
+		if RoomPlanner.LIGHTS[want.id] then
+			for _, at in ipairs(lights) do
+				if distanceTo(body, at.x, at.z) < RoomPlanner.LIGHT_APART then
+					return false
+				end
 			end
 		end
 		for _, p in ipairs(placed) do
@@ -406,6 +427,13 @@ function RoomPlanner.plan(room, wants, fill, rng, pause: (() -> ())?)
 		if want.place ~= "free" and not want.near then
 			score = score + spread(body) * 0.25
 		end
+		if RoomPlanner.LIGHTS[want.id] then
+			local d = 8
+			for _, at in ipairs(lights) do
+				d = math.min(d, distanceTo(body, at.x, at.z))
+			end
+			score = score + d * RoomPlanner.LIGHT_SPREAD
+		end
 		return score
 	end
 
@@ -413,6 +441,9 @@ function RoomPlanner.plan(room, wants, fill, rng, pause: (() -> ())?)
 		local p = { want = want, x = c.x, z = c.z, lx = c.lx, lz = c.lz, body = body, access = access, flat = want.flat, s = s }
 		table.insert(placed, p)
 		table.insert(layout, { want = want, x = c.x, z = c.z, lx = c.lx, lz = c.lz, s = s, seatOf = seatOf })
+		if RoomPlanner.LIGHTS[want.id] then
+			table.insert(lights, { x = c.x, z = c.z })
+		end
 		return p
 	end
 
