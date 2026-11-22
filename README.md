@@ -46,7 +46,7 @@ Procedural plants for Roblox, extracted from Plant World.
   stand under or beside a wall lamp or near another light, and each picks
   the spot furthest from the room's other lights (`RoomPlanner.LIGHTS`).
   A drafts table always has its two matching stools, one at each end facing
-  the board, with room to get on them (0.1.15 fixed both being built inside
+  the board, with room to get on them (0.1.17 fixed both being built inside
   the table).
 - **RoomTidy**: suggests a better arrangement of a room's pieces by interior
   design rules (after Merrell et al. 2011, "Interactive Furniture Layout
@@ -56,7 +56,7 @@ Procedural plants for Roblox, extracted from Plant World.
 
 ```toml
 [dependencies]
-Plants = "dooougs/plants@0.1.16"
+Plants = "dooougs/plants@0.1.17"
 ```
 
 ## Use
