@@ -55,6 +55,10 @@ Procedural plants for Roblox, extracted from Plant World.
   fits inside it with a margin and has a twin on the back (`made.back`),
   posts stop inside the board, the topper stands on its real top, and the
   trim runs round the rim, never over the face or under the topper.
+  `Furniture.refurnish(model, room, pieces, restOf)` (0.1.20) re-arranges
+  one room of a grown home in place: a piece that only moved or turned is
+  moved, new or changed pieces are grown, gone ones destroyed. The rest of
+  the plant is left alone, so moving a chair never rebuilds the plant.
 - **RoomTidy**: suggests a better arrangement of a room's pieces by interior
   design rules (after Merrell et al. 2011, "Interactive Furniture Layout
   Using Interior Design Guidelines").
@@ -63,7 +67,7 @@ Procedural plants for Roblox, extracted from Plant World.
 
 ```toml
 [dependencies]
-Plants = "dooougs/plants@0.1.19"
+Plants = "dooougs/plants@0.1.20"
 ```
 
 ## Use
