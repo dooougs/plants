@@ -59,6 +59,10 @@ Procedural plants for Roblox, extracted from Plant World.
   one room of a grown home in place: a piece that only moved or turned is
   moved, new or changed pieces are grown, gone ones destroyed. The rest of
   the plant is left alone, so moving a chair never rebuilds the plant.
+  Rooms are kept through rebuilds (0.1.21): pass the plant's shown model as
+  `options.reuseRooms` (and `options.restOf(part)`, its rest pose) and any
+  room built from the same signature (`Habitat.signature`) with the same
+  furniture is copied over, smooth shell and all, instead of built again.
 - **RoomTidy**: suggests a better arrangement of a room's pieces by interior
   design rules (after Merrell et al. 2011, "Interactive Furniture Layout
   Using Interior Design Guidelines").
@@ -67,7 +71,7 @@ Procedural plants for Roblox, extracted from Plant World.
 
 ```toml
 [dependencies]
-Plants = "dooougs/plants@0.1.20"
+Plants = "dooougs/plants@0.1.21"
 ```
 
 ## Use

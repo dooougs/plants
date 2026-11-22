@@ -598,7 +598,19 @@ type ShellJob = {
 	room: Room,
 	color: Color3,
 	material: Enum.Material,
+	record: RoomRecord?, -- its room's record (Habitat.built): the shell joins its parts
 }
+
+-- What a built room is made of, so a later build of the same plant with the
+-- same room can copy it instead of building it again (Habitat.transplant).
+export type RoomRecord = {
+	sig: string, -- everything the room was built from (Habitat.signature)
+	parts: { BasePart }, -- its parts, but a home's furniture (Furniture.grown has that)
+	pending: boolean, -- its smooth shell isn't in yet
+}
+-- model -> room number -> RoomRecord. Weak: a model thrown away takes its rooms.
+Habitat.built = setmetatable({}, { __mode = "k" }) :: { [Instance]: { [number]: RoomRecord } }
+
 local queue: { ShellJob } = {}
 local running = false
 
@@ -802,6 +814,9 @@ local function drain()
 				link.Value = ref
 				link.Parent = shell
 				shell.Parent = model
+				if job.record then
+					table.insert(job.record.parts, shell)
+				end
 				for _, p in job.group do
 					if p.Parent then
 						if p.CanCollide then
@@ -815,6 +830,9 @@ local function drain()
 			elseif shell then
 				shell:Destroy()
 			end
+		end
+		if job.record then
+			job.record.pending = false
 		end
 		pendingCount(model, -1) -- see Smooth.PENDING_ATTRIBUTE
 		task.wait() -- spread the work over frames
@@ -998,10 +1016,7 @@ end
 -- the top of the stem below). stemR0 and stemR1 are the stem's radius where
 -- it enters the room and where it leaves the roof. Nothing is built on dry
 -- runs; the room's size comes from Habitat.room either way.
-function Habitat.build(ctx, bottomCF: CFrame, room: Room, stemR0: number, stemR1: number, stemColor: Color3)
-	if not ctx.model then
-		return
-	end
+local function buildRoom(ctx, bottomCF: CFrame, room: Room, stemR0: number, stemR1: number, stemColor: Color3)
 	local mk = ctx.make
 	local u = room.unit
 	local t = room.wall
@@ -1222,8 +1237,192 @@ function Habitat.build(ctx, bottomCF: CFrame, room: Room, stemR0: number, stemR1
 				room = room,
 				color = wallColor,
 				material = M.stem,
+				record = ctx.habitatRecord,
 			})
+			if ctx.habitatRecord then
+				ctx.habitatRecord.pending = true
+			end
 		end
+	end
+end
+
+---------------------------------------------------------------- keeping rooms
+
+-- A value as text for a signature: numbers to 1/10000.
+local function sigOf(v: any): string
+	local t = typeof(v)
+	if t == "number" then
+		return string.format("%.4f", v)
+	elseif t == "Vector3" then
+		return string.format("%.4f,%.4f,%.4f", v.X, v.Y, v.Z)
+	elseif t == "Color3" then
+		return string.format("%.3f,%.3f,%.3f", v.R, v.G, v.B)
+	elseif t == "CFrame" then
+		local parts = { v:GetComponents() }
+		for i, c in parts do
+			parts[i] = string.format("%.4f", c)
+		end
+		return table.concat(parts, ",")
+	end
+	return tostring(v)
+end
+
+-- A table's plain values (numbers, flags, text, colours, vectors), by key.
+local function tableSig(tbl: { [any]: any }): string
+	local keys = {}
+	for k, v in tbl do
+		local t = typeof(v)
+		if type(k) == "string" and (t == "number" or t == "boolean" or t == "string" or t == "Color3" or t == "Vector3") then
+			table.insert(keys, k)
+		end
+	end
+	table.sort(keys)
+	for i, k in keys do
+		keys[i] = k .. "=" .. sigOf(tbl[k])
+	end
+	return table.concat(keys, ";")
+end
+
+-- Everything a room's build depends on (but a home's furniture, which
+-- Furniture.furnSig covers): two builds with the same signature make the
+-- same room, part for part.
+function Habitat.signature(ctx, bottomCF: CFrame, room: Room, stemR0: number, stemR1: number, stemColor: Color3): string
+	local plant = ctx.habitatPlantSig
+	if not plant then
+		plant = table.concat({
+			sigOf(ctx.seed),
+			tableSig(ctx.colors),
+			tostring(ctx.ultra),
+			tostring(ctx.habitatDetail),
+			tostring(ctx.climb),
+			tostring(ctx.flame),
+			tostring(ctx.heat),
+			tostring(ctx.building),
+			tostring(ctx.decorSeed),
+			tostring(ctx.landAt ~= nil),
+			tostring(Habitat.UNION),
+			tostring(Host.features.furniture),
+		}, "|")
+		ctx.habitatPlantSig = plant
+	end
+	return table.concat({
+		plant,
+		tableSig(room :: any),
+		sigOf(bottomCF),
+		sigOf(stemR0),
+		sigOf(stemR1),
+		sigOf(stemColor),
+		tostring(Furniture.purposeFor(ctx, room.number)),
+	}, "|")
+end
+
+--[[
+	Builds one room up a building plant's stem: its shell, door frame,
+	panes, floor, lamps and furniture.
+
+	A plant is rebuilt whenever anything about it changes (a growth step,
+	its leaves growing round a neighbour's new room), but its rooms usually
+	come out exactly the same. So when the build is given the plant's shown
+	model (options.reuseRooms) and that model has this room built from the
+	same signature, with the same furniture, the room is not built again:
+	it is copied over, smooth shell and all, once the model is scaled
+	(Habitat.transplant). No unions are made for it.
+]]
+function Habitat.build(ctx, bottomCF: CFrame, room: Room, stemR0: number, stemR1: number, stemColor: Color3)
+	local model = ctx.model
+	if not model then
+		return
+	end
+	local sig = Habitat.signature(ctx, bottomCF, room, stemR0, stemR1, stemColor)
+	local old = ctx.reuseRooms
+	local oldRooms = if old then Habitat.built[old] else nil
+	local rec = oldRooms and oldRooms[room.number]
+	if rec and rec.sig == sig and not rec.pending and Furniture.furnSigOf(old, room.number) == Furniture.furnSig(ctx, room.number) then
+		ctx.reusedRooms = ctx.reusedRooms or {}
+		table.insert(ctx.reusedRooms, room.number)
+		return
+	end
+
+	-- Which parts this room is made of: whatever it adds to the model (a
+	-- held model gets no unions while it is built, so nothing else does).
+	local before = {}
+	for _, c in model:GetChildren() do
+		before[c] = true
+	end
+	local record: RoomRecord = { sig = sig, parts = {}, pending = false }
+	ctx.habitatRecord = record
+	buildRoom(ctx, bottomCF, room, stemR0, stemR1, stemColor)
+	ctx.habitatRecord = nil
+	local furniture = Furniture.partsOf(model, room.number)
+	for _, c in model:GetChildren() do
+		if not before[c] and c:IsA("BasePart") and not furniture[c] then
+			table.insert(record.parts, c)
+		end
+	end
+	local rooms = Habitat.built[model] or {}
+	rooms[room.number] = record
+	Habitat.built[model] = rooms
+end
+
+--[[
+	Copies the rooms Habitat.build skipped (ctx.reusedRooms) from the shown
+	model `old` into the new `model`, which is now at world scale. Each part
+	goes in at its rest pose (`restOf`, as the old model may be mid-sway);
+	links between them (a shell's sway reference, a handle's parts) point at
+	the copies, and the copies are recorded so the next build can keep them
+	in turn.
+]]
+function Habitat.transplant(ctx, model: Model, old: Instance, restOf: ((BasePart) -> CFrame?)?)
+	local oldRooms = Habitat.built[old]
+	local numbers = ctx.reusedRooms
+	if not oldRooms or not numbers then
+		return
+	end
+	local rooms = Habitat.built[model] or {}
+	Habitat.built[model] = rooms
+	for _, n in numbers do
+		local rec = oldRooms[n]
+		if not rec then
+			continue
+		end
+		local map: { [Instance]: BasePart } = {}
+		local function copy(p: BasePart?): BasePart?
+			if not p then
+				return nil
+			end
+			if map[p] then
+				return map[p]
+			end
+			if not p.Parent then
+				return nil
+			end
+			local c = p:Clone()
+			if not c then
+				return nil
+			end
+			c.CFrame = (if restOf then restOf(p) else nil) or p.CFrame
+			c.LocalTransparencyModifier = 0
+			c.Parent = model
+			map[p] = c
+			return c
+		end
+		local parts = {}
+		for _, p in rec.parts do
+			local c = copy(p)
+			if c then
+				table.insert(parts, c)
+			end
+		end
+		Furniture.copyRoom(old, model, n, copy)
+		for from, c in map do
+			for _, d in c:GetDescendants() do
+				if d:IsA("ObjectValue") and d.Value then
+					d.Value = map[d.Value]
+				end
+			end
+			Furniture.copyHandle(from, c, map)
+		end
+		rooms[n] = { sig = rec.sig, parts = parts, pending = false }
 	end
 end
 
