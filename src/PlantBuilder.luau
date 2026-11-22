@@ -430,6 +430,11 @@ end
 	and a little up, a step at a time; if no turn clears it, the blade ends
 	there (a shorter leaf), and a leaf whose stalk can't clear isn't grown.
 	Boxes are in design studs round the base (run converts them).
+
+	A plant's own rooms are kept clear the same way (own = true, added by
+	run once its rooms are laid out), so a leaf from a lower node or another
+	stem doesn't grow up through a room's floor or walls. Leaves set into a
+	room's shell (sessile) are left alone: they belong there.
 ]]
 local KEEP_PAD = 0.25 -- design studs of air kept between a leaf and a room's walls
 local STEER_STEP = 0.22 -- radians per turn
@@ -437,11 +442,13 @@ local STEER_TRIES = 9
 
 local function inRoom(ctx, p: Vector3): Vector3?
 	for _, b in ctx.keepOutBoxes do
+		if b.own and ctx.sessileLeaf then
+			continue -- a leaf set into its own room's shell grows out of it
+		end
 		local q = b.cf:PointToObjectSpace(p)
-		if q.Y > -KEEP_PAD and q.Y < b.top + KEEP_PAD then
-			local ex, ez = b.halfX + KEEP_PAD, b.halfZ + KEEP_PAD
-			local nx, nz = q.X / ex, q.Z / ez
-			if nx * nx + nz * nz < 1 then
+		if q.Y > -KEEP_PAD and q.Y < b.top + KEEP_PAD and PlantSynth.Layout.inFootprint(b, q, KEEP_PAD) then
+			local nx, nz = q.X / (b.halfX + KEEP_PAD), q.Z / (b.halfZ + KEEP_PAD)
+			do
 				-- the way out: away from the room's middle
 				local out = b.cf:VectorToWorldSpace(Vector3.new(nx, 0, nz))
 				if out.Magnitude < 1e-3 then
@@ -513,11 +520,12 @@ local function buildLeaf(ctx, baseCF: CFrame, length: number, maturity: number, 
 		return c * CFrame.new(0, 0, -petiole * 0.5), Vector3.new(petioleW, petioleW, math.max(petiole, L * 0.12))
 	end
 	local cf = profileGeometry(ctx, "PlantLeafClearance", clearGround, ctx, baseCF, stalk)
+	ctx.sessileLeaf = sessile == true -- read by inRoom for this leaf's pieces
 	if ctx.keepOutBoxes then
 		local blocked
 		cf, blocked = steerClear(ctx, cf, stalk)
 		if blocked then
-			return -- it would grow straight into another plant's room
+			return -- it would grow straight into a room
 		end
 	end
 	-- The whole leaf swings where its petiole meets the stem.
@@ -1440,6 +1448,50 @@ local function liftForLayout(ctx, baseCF: CFrame, L): (number, boolean)
 	return math.min(need, MAX_LIFT), hall
 end
 
+-- This plant's own rooms as keep-out boxes (design studs, own = true), so
+-- its leaves don't grow into them (see steerClear). Walks the classic main
+-- stem the way growAxis does (as liftFor), or reads a grammar layout's rooms.
+local function ownRoomBoxes(ctx, start: CFrame, spread, rooms: { [number]: number }?, N: number, internode: number, thick: number): { any }
+	local boxes = {}
+	local function add(bottom: CFrame, room)
+		table.insert(boxes, { cf = Habitat.frameOf(bottom, room), halfX = room.halfX, halfZ = room.halfZ, top = room.topY, own = true })
+	end
+	if spread then
+		for _, R in spread.rooms do
+			add(CFrame.new(start:PointToWorldSpace(R.bottom)) * start.Rotation, R.room)
+		end
+	elseif rooms and ctx.habitatSwell then
+		local pos, dir = start.Position, start.UpVector
+		local visible = ctx.v * N
+		for i = 0, N - 1 do
+			local grow = math.clamp(visible - i, 0, 1)
+			if grow <= 0 then
+				break
+			end
+			local r = ctx.rng(1, i + 1) -- growAxis's salt 1, node i
+			local th = lerp(thick, thick * 0.45, i / N) * ctx.thickScale
+			local nextPos, nextDir, room = stemStep(ctx, pos, dir, r, internode * grow, th, rooms[i], grow)
+			if room then
+				add(CFrame.new(pos) * ctx.upright.Rotation, room)
+			end
+			pos, dir = nextPos, nextDir
+		end
+	end
+	return boxes
+end
+
+-- Other plants' rooms (ctx.keepOutBoxes, not own) in a grammar layout's
+-- frame (start), for PlantSynth to grow its shoots round (Layout plan.avoid).
+local function avoidFor(ctx, start: CFrame): { any }
+	local list = {}
+	for _, b in ctx.keepOutBoxes or {} do
+		if not b.own then
+			table.insert(list, { cf = start:ToObjectSpace(b.cf), halfX = b.halfX, halfZ = b.halfZ, top = b.top })
+		end
+	end
+	return list
+end
+
 -- Does this plant grow from the shape grammar? Building plants only when
 -- their rooms go on any stem (they always do then, so everyone agrees where
 -- the rooms are); other plants when the game (or options.synth) says so.
@@ -1505,7 +1557,8 @@ end
 -- (buildFlower) on pedicels where they sit beside the axis, and the main
 -- axis climbable the way the classic main stem is.
 local function growSynth(ctx, start: CFrame, laidOut: any?)
-	local L = laidOut or PlantSynth.layout(ctx.genome, ctx.p, ctx.seed, ctx.examples)
+	-- (In a real build its shoots grow round other plants' rooms.)
+	local L = laidOut or PlantSynth.layout(ctx.genome, ctx.p, ctx.seed, ctx.examples, if ctx.model then { rooms = {}, avoid = avoidFor(ctx, start) } else nil)
 	local function at(v: Vector3): Vector3
 		return start:PointToWorldSpace(v)
 	end
@@ -1712,9 +1765,9 @@ local function run(ctx, baseCF: CFrame)
 	-- grammar, which places its rooms (PlantSynth.roomPlan); laid out once
 	-- here, as the lift needs it. Every other building plant plans its rooms
 	-- up the classic main stem, exactly as before.
-	local spread = nil
+	local spread, plan = nil, nil
 	if building and Genome.roomsAnywhere(ctx.genome) then
-		local plan = PlantSynth.roomPlan(ctx.genome, ctx.seed, ctx.examples, ctx.maxRooms, ctx.breathe)
+		plan = PlantSynth.roomPlan(ctx.genome, ctx.seed, ctx.examples, ctx.maxRooms, ctx.breathe)
 		if plan then
 			spread = PlantSynth.layout(ctx.genome, p, ctx.seed, ctx.examples, { rooms = plan.rooms, pruned = plan.pruned, swell = ctx.habitatSwell })
 		end
@@ -1776,7 +1829,25 @@ local function run(ctx, baseCF: CFrame)
 		end
 	end
 
+	-- This plant's own rooms join the keep-out boxes, so its own leaves grow
+	-- round them too (leaves set into a room's shell are left alone).
+	if ctx.model and building and ctx.habitatSwell then
+		local own = ownRoomBoxes(ctx, start, spread, rooms, N, internode, thick)
+		if #own > 0 then
+			local all = table.clone(ctx.keepOutBoxes or {})
+			for _, b in own do
+				table.insert(all, b)
+			end
+			ctx.keepOutBoxes = all
+		end
+	end
+
 	if spread then
+		if ctx.model and plan then
+			-- Laid out again, its side shoots growing round other plants'
+			-- rooms and its own (the rooms themselves never move).
+			spread = PlantSynth.layout(ctx.genome, p, ctx.seed, ctx.examples, { rooms = plan.rooms, pruned = plan.pruned, swell = ctx.habitatSwell, avoid = avoidFor(ctx, start) })
+		end
 		growSynth(ctx, start, spread)
 		return
 	end

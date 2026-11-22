@@ -69,7 +69,10 @@ export type RoomAt = {
 -- Which nodes are rooms (node vid -> room number), how far the rooms have
 -- swollen (Growth.HABITAT phase; nil or 0: none yet), and the side shoots
 -- that don't grow because a room took their place (axis vid -> anything).
-export type Plan = { rooms: { [number]: number }, swell: number?, pruned: { [number]: any }? }
+-- avoid: rooms to grow round (see steerOut), in the plant's own frame; this
+-- plant's own rooms are added to them. nil: grow as always.
+export type Box = { cf: CFrame, halfX: number, halfZ: number, top: number, own: boolean? }
+export type Plan = { rooms: { [number]: number }, swell: number?, pruned: { [number]: any }?, avoid: { Box }? }
 export type Leaf = { vid: number, kind: string, pos: Vector3, dir: Vector3, len: number, maturity: number, nodeT: number, stemD: number, sessile: boolean }
 export type Flower = { vid: number, pos: Vector3, dir: Vector3, scale: number, bud: number, bloom: number, pedicel: { a: Vector3, b: Vector3, d: number }?, az: number, top: boolean }
 export type Result = {
@@ -126,6 +129,74 @@ end
 
 Layout.ROOM_GAP = 0.15 -- design studs of air kept round a room
 
+--[[
+	Growing round rooms (plan.avoid): a side shoot whose next stretch would
+	pass into a room (another plant's, or one of this plant's own) turns
+	away from it, out from the room's middle and down under it or up over
+	it, a little at a time, the way a real shoot grows round an obstacle,
+	and grows on from there in its new direction. If no turn clears it, the
+	shoot stops there. A flower on a stalk that would sit in a room isn't
+	grown. Main stems never turn (they carry the rooms and the top flower,
+	which the server knows the place of), nor do side shoots carrying a room.
+]]
+Layout.AVOID_PAD = 0.35 -- design studs of air kept between a shoot and a room
+Layout.AVOID_STEP = 0.25 -- radians per turn
+Layout.AVOID_TRIES = 10
+
+-- Is room-local (q.X, q.Z) inside the room's rounded-rectangle footprint
+-- (corners rounded as Habitat rounds them), grown by pad?
+function Layout.inFootprint(b: Box, q: Vector3, pad: number): boolean
+	local hx, hz = b.halfX + pad, b.halfZ + pad
+	local ax, az = math.abs(q.X), math.abs(q.Z)
+	if ax >= hx or az >= hz then
+		return false
+	end
+	local r = math.min(b.halfX, b.halfZ) * 0.3 + pad
+	local dx, dz = math.max(ax - (hx - r), 0), math.max(az - (hz - r), 0)
+	return dx * dx + dz * dz < r * r
+end
+
+-- The way out of the first room p is in (padded), or nil.
+local function inBox(boxes: { Box }, p: Vector3, pad: number): Vector3?
+	for _, b in boxes do
+		local q = b.cf:PointToObjectSpace(p)
+		if q.Y > -pad and q.Y < b.top + pad and Layout.inFootprint(b, q, pad) then
+			local nx, nz = q.X / (b.halfX + pad), q.Z / (b.halfZ + pad)
+			do
+				local out = b.cf:VectorToWorldSpace(Vector3.new(nx, 0, nz))
+				out = if out.Magnitude > 1e-3 then out.Unit else b.cf.LookVector
+				-- under its lower half, duck beneath it; else rise over it
+				local vy = if q.Y < b.top * 0.4 then -0.45 else 0.45
+				return (out + b.cf.UpVector * vy).Unit
+			end
+		end
+	end
+	return nil
+end
+Layout.inBox = inBox
+
+-- Turn d (from pos, a stretch len long) until neither its middle nor its end
+-- is in a room. Returns the new direction, or nil if it can't be cleared.
+local function steerOut(boxes: { Box }, pos: Vector3, d: Vector3, len: number): Vector3?
+	local pad = Layout.AVOID_PAD
+	local away = inBox(boxes, pos + d * len, pad) or inBox(boxes, pos + d * len * 0.5, pad)
+	if not away then
+		return d
+	end
+	for _ = 1, Layout.AVOID_TRIES do
+		local axis = d:Cross(away)
+		if axis.Magnitude < 1e-4 then
+			axis = perp(d)
+		end
+		d = CFrame.fromAxisAngle(axis.Unit, Layout.AVOID_STEP):VectorToWorldSpace(d).Unit
+		away = inBox(boxes, pos + d * len, pad) or inBox(boxes, pos + d * len * 0.5, pad)
+		if not away then
+			return d
+		end
+	end
+	return nil
+end
+
 -- The circle round a room's walls, plus ROOM_GAP.
 -- How big a plant's rooms are next to a plant of ordinary height (1):
 -- rooms grow with the plant's stature, from 0.85 on the smallest plants up
@@ -159,6 +230,7 @@ function Layout.layout(G: Derive.Graph, g: { [string]: number }, p: number, plan
 	-- enough that the room clears the stem: they leave at a wide angle, and
 	-- their internodes up to the room stretch (by a factor worked out on the
 	-- grown plant, so the shoot only ever lengthens as it grows).
+	local avoidBoxes: { Box }? = nil -- set below, once the plant's own rooms are known
 	local roomAxes: { [number]: number } = {} -- axis id -> its first room's node index
 	local stretch: { [number]: number } = {}
 	local axisStart: { [number]: Vector3 } = {}
@@ -271,6 +343,17 @@ function Layout.layout(G: Derive.Graph, g: { [string]: number }, p: number, plan
 				u = transport(u, d)
 				prevD = d
 				len = (room :: Habitat.Room).total
+			end
+			if avoidBoxes and not room and not isMain and not roomAxes[ax.id] and len > 1e-4 then
+				-- grow round rooms (see steerOut); stop if there's no way round
+				local nd2 = steerOut(avoidBoxes, pos, d, len)
+				if not nd2 then
+					break
+				end
+				if nd2 ~= d then
+					d = nd2
+					u = transport(u, d)
+				end
 			end
 			local np = pos + d * len
 			-- A room on the next node: this node is under its floor.
@@ -420,6 +503,9 @@ function Layout.layout(G: Derive.Graph, g: { [string]: number }, p: number, plan
 							end
 							pedicel = { a = base, b = fpos, d = 0.1 * fscale + 0.04 }
 						end
+						if avoidBoxes and not isMain and not roomAxes[ax.id] and inBox(avoidBoxes, fpos, Layout.AVOID_PAD) then
+							continue -- it would open inside a room
+						end
 						table.insert(out.flowers, { vid = at.vid, pos = fpos, dir = fdir, scale = fscale, bud = bud, bloom = bloom, pedicel = pedicel, az = (at.vid % 6283) / 1000, top = isMain and terminal })
 					end
 				elseif at.axis and not (pruned and pruned[at.axis.vid]) then
@@ -487,6 +573,19 @@ function Layout.layout(G: Derive.Graph, g: { [string]: number }, p: number, plan
 			roomOf = if swell then plan.rooms else nil
 		end
 		stretch = found
+	end
+	if plan and plan.avoid then
+		-- Grow round rooms: other plants' (plan.avoid) and this plant's own,
+		-- which stay where they are (no shoot carrying one ever turns).
+		local boxes = table.clone(plan.avoid)
+		if roomOf then
+			walkAll()
+			for _, R in out.rooms do
+				local frame = Habitat.frameOf(CFrame.new(R.bottom), R.room)
+				table.insert(boxes, { cf = frame, halfX = R.room.halfX, halfZ = R.room.halfZ, top = R.room.topY, own = true })
+			end
+		end
+		avoidBoxes = if #boxes > 0 then boxes else nil
 	end
 	walkAll()
 	return out

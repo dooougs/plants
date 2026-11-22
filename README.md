@@ -50,7 +50,7 @@ Procedural plants for Roblox, extracted from Plant World.
 
 ```toml
 [dependencies]
-Plants = "dooougs/plants@0.1.13"
+Plants = "dooougs/plants@0.1.14"
 ```
 
 ## Use
@@ -141,6 +141,14 @@ PlantBuilder.build(genome, progress, cf, { synth = true, examples = { "fern", "l
   grown at all if its stalk can't clear. So plants can stand close to a
   building without leaves poking through its walls. Without `keepOut`
   nothing changes.
+- Growing round rooms: in a real build a grammar plant's side shoots grow
+  round other plants' rooms (`keepOut`) and its own: a shoot heading into a
+  room turns away, under it or over it, and grows on from there, or stops if
+  it can't get round; a flower that would open inside a room isn't grown.
+  A plant's own leaves keep out of its own rooms too (leaves set into a
+  room's shell stay). Main stems and shoots carrying rooms never turn, so
+  rooms and the top flower stay where they are. Layout takes the rooms as
+  `plan.avoid` (boxes in the plant's frame); without it nothing changes.
 - `roomStems` reads 0 in every genome string saved before it existed, and
   `Genome.fromSeed` sets it to 0, so existing and fixed buildings keep their
   rooms exactly where they are. `Genome.spreadRooms(g, seed)` turns it on
