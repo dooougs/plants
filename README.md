@@ -51,6 +51,10 @@ Procedural plants for Roblox, extracted from Plant World.
   A room split into two zones may also be divided by folding screens on
   the line between them (0.1.18, seeded: one, or two in a long room), with
   walkways left at the ends, between them and round the stem.
+  Signs (`dsign`) read their board's outline (0.1.19): the written-on face
+  fits inside it with a margin and has a twin on the back (`made.back`),
+  posts stop inside the board, the topper stands on its real top, and the
+  trim runs round the rim, never over the face or under the topper.
 - **RoomTidy**: suggests a better arrangement of a room's pieces by interior
   design rules (after Merrell et al. 2011, "Interactive Furniture Layout
   Using Interior Design Guidelines").
@@ -59,7 +63,7 @@ Procedural plants for Roblox, extracted from Plant World.
 
 ```toml
 [dependencies]
-Plants = "dooougs/plants@0.1.18"
+Plants = "dooougs/plants@0.1.19"
 ```
 
 ## Use
