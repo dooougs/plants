@@ -75,6 +75,9 @@ FurnitureRules.KINDS = {
 	-- their town's style by the buildings themselves
 	dstall = { name = "Market Stall", icon = "⛺", uses = { legs = true, shape = true, back = true, trim = true, weight = true, size = true, colour = true }, civic = true },
 	dcounter = { name = "Counter", icon = "🛎️", uses = { legs = true, shape = true, back = true, trim = true, weight = true, size = true, colour = true }, civic = true },
+	-- town decorations (not sold): signs and washing-line poles
+	dsign = { name = "Sign", icon = "🪧", uses = { legs = true, shape = true, back = true, trim = true, weight = true, size = true, colour = true }, civic = true },
+	dpole = { name = "Pole", icon = "🎏", uses = { legs = true, shape = true, back = true, trim = true, weight = true, size = true, colour = true }, civic = true },
 }
 FurnitureRules.ORDER = { "dchair", "dtable", "dstool", "dbench", "dbed", "dlamp", "dshelf" }
 
@@ -127,6 +130,8 @@ FurnitureRules.PART_NAMES = {
 	dbench = { shape = "Seat" },
 	dstall = { shape = "Awning", back = "Backboard" },
 	dcounter = { legs = "Feet", back = "Front" },
+	dsign = { legs = "Posts", shape = "Board", back = "Topper" },
+	dpole = { legs = "Pole", shape = "Finial", back = "Arm" },
 }
 
 -- Decor styles. Each lists the choices it allows for each rule (by number,
