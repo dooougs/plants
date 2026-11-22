@@ -2094,7 +2094,14 @@ local function grownWant(id: string, opts: { [string]: any }?, seed: number, dec
 	local styled = decor and FurnitureRules.STYLED[id]
 	if not styled then
 		-- every other piece keeps its body, dressed in the style
-		return wantFor(id, opts, Random.new(seed), if decor then FurnitureRules.groupRecipe(decor, id, seed) else nil)
+		local w = wantFor(id, opts, Random.new(seed), if decor then FurnitureRules.groupRecipe(decor, id, seed) else nil)
+		if w and decor then
+			w.fromStyle = true
+			if w.seats then
+				w.seats.fromStyle = true
+			end
+		end
+		return w
 	end
 	local w = wantFor(styled, opts, Random.new(seed), FurnitureRules.groupRecipe(decor, styled, seed))
 	if not w then
@@ -2115,10 +2122,141 @@ local function grownWant(id: string, opts: { [string]: any }?, seed: number, dec
 		if seat then
 			seat.seed = seatSeed
 			seat.n = legacy.seats.n
+			seat.fromStyle = true
 			w.seats = seat
 		end
 	end
+	w.fromStyle = true
 	return w
+end
+
+---------------------------------------------------------------- zones
+
+-- A piece's design (its recipe's rules), designed or dressed.
+local function designOf(w: any): any?
+	if w.r then
+		return FurnitureRules.decode(w.r)
+	end
+	return w.p and w.p.styled
+end
+
+-- `w` grown in style `g` instead, its size and weight kept (so it fits where
+-- it was planned), or nil if it would grow any bigger across.
+local function restyled(w: any, g: any): any?
+	local d = designOf(w)
+	if not d or not w.seed then
+		return nil
+	end
+	local nw = wantFor(w.id, nil, Random.new(w.seed), FurnitureRules.groupRecipe(g, w.id, w.seed, { size = d.size, weight = d.weight }))
+	if not nw or nw.w > w.w + 0.05 or nw.d > w.d + 0.05 then
+		return nil
+	end
+	nw.seed = w.seed
+	nw.n = w.n
+	nw.fromStyle = true
+	return nw
+end
+
+local function inSet(set: any, id: string, role: string): boolean
+	return set[role][id] == true
+end
+
+-- Splits a room's layout into its zones (FurnitureRules.roomZones): pieces
+-- in the second zone grow in its style. Pieces that go together (a table and
+-- its chairs, a bed and its bedside chest, a fire and its armchairs:
+-- FurnitureRules.SETS, and anything planned near or facing another) follow
+-- the piece they go with, so a set always matches. Only pieces whose style
+-- came from the building change: an owner's own designs keep theirs.
+function Furniture.zone(layout: { any }, zones: any)
+	if not zones then
+		return
+	end
+	local function side(item: any): boolean
+		local v = if zones.axis == "x" then item.x else item.z
+		local past = v > zones.at
+		return if zones.far then not past else past
+	end
+	-- each piece's leader: the one it goes with, or itself
+	local leader = {}
+	for i, item in layout do
+		local w = item.want
+		local best, bestD = nil, math.huge
+		if item.seatOf then
+			for j, other in layout do
+				if other.want == item.seatOf.want and j ~= i then
+					local dx, dz = other.x - item.x, other.z - item.z
+					local dd = dx * dx + dz * dz
+					if dd < bestD then
+						best, bestD = j, dd
+					end
+				end
+			end
+		end
+		if not best then
+			for j, other in layout do
+				if j ~= i then
+					local id, oid = w.id, other.want.id
+					local reach = 0
+					if w.near == oid or w.facing == oid then
+						reach = 8
+					end
+					for _, set in FurnitureRules.SETS do
+						if inSet(set, id, "followers") and inSet(set, oid, "leaders") and not inSet(set, id, "leaders") then
+							reach = math.max(reach, set.reach)
+						end
+					end
+					if reach > 0 then
+						local dx, dz = other.x - item.x, other.z - item.z
+						local dd = dx * dx + dz * dz
+						if dd < reach * reach and dd < bestD then
+							best, bestD = j, dd
+						end
+					end
+				end
+			end
+		end
+		leader[i] = best or i
+	end
+	-- follow chains to the top (a chair -> its table)
+	local function top(i: number): number
+		local seen = 0
+		while leader[i] ~= i and seen < 8 do
+			i = leader[i]
+			seen += 1
+		end
+		return i
+	end
+	local groups: { [number]: { number } } = {}
+	for i in layout do
+		local t = top(i)
+		groups[t] = groups[t] or {}
+		table.insert(groups[t], i)
+	end
+	for t, members in groups do
+		if side(layout[t]) then
+			-- the whole set, or none of it if any piece wouldn't fit
+			local swaps = {}
+			local cache = {}
+			local ok = true
+			for _, i in members do
+				local w = layout[i].want
+				if w.fromStyle then
+					local nw = cache[w] or restyled(w, zones.group)
+					if not nw then
+						ok = false
+						break
+					end
+					cache[w] = nw
+					swaps[i] = nw
+				end
+			end
+			if ok then
+				for i, nw in swaps do
+					layout[i].want = nw
+				end
+			end
+		end
+	end
 end
 
 -- The layout for one room: purpose -> wants -> RoomPlanner. `decor` (a
@@ -2302,7 +2440,9 @@ function Furniture.furnish(ctx, frame: CFrame, room: any, keepClear: number)
 	-- Every building furnishes in a decor style (ctx.decorSeed: its town's,
 	-- or a home's own): designed pieces where there's a stand-in, every
 	-- other piece dressed in it.
-	local decor = if ctx.decorSeed then FurnitureRules.groupStyle(ctx.decorSeed) else nil
+	-- Each room has its own style or the building's (FurnitureRules.roomStyle),
+	-- and a big room may be split into zones in two styles (Furniture.zone).
+	local decor = if ctx.decorSeed then FurnitureRules.roomStyle(ctx.decorSeed, room.number) else nil
 	if arranged then
 		-- its owner's own arrangement (Shared.Housing.RoomFurniture): designed
 		-- pieces keep their own recipe, grown ones are dressed in the home's
@@ -2320,12 +2460,16 @@ function Furniture.furnish(ctx, frame: CFrame, room: any, keepClear: number)
 			local w = wantFor(piece.id, nil, Random.new(piece.seed), recipe)
 			if w then
 				w.seed = piece.seed
+				w.fromStyle = recipe ~= nil and piece.r == nil
 				local lx, lz = RoomFurniture.look(piece.a)
 				table.insert(layout, { want = w, x = piece.x, z = piece.z, lx = lx, lz = lz, s = piece.s, key = piece.key })
 			end
 		end
 	else
 		layout = Furniture.layout(purpose :: string, planRoom, ctx.rng(6029, room.number), pause, decor)
+	end
+	if decor then
+		Furniture.zone(layout, FurnitureRules.roomZones(ctx.decorSeed, room.number, planRoom.ax, planRoom.az, decor))
 	end
 	if mark then
 		mark(construction)
