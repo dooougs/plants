@@ -401,6 +401,8 @@ FurnitureGrammar.PLACE = {
 	dshelf = { place = "wall", corner = 0.3, access = 1.6 },
 	dstall = { place = "wall", corner = 0.2, access = 2.5 },
 	dcounter = { place = "wall", corner = 0.3, access = 2 },
+	dsign = { place = "free", access = 1.5 },
+	dpole = { place = "free", access = 0 },
 }
 
 KINDS.dchair = {
@@ -746,6 +748,140 @@ KINDS.dcounter = {
 		local topPart = B.parts[from + 1]
 		trim(B, P, d.trim, d.shape, W + 0.6, D + 0.5, topY - t / 2, nil, nil, nil, nil, nil, true)
 		return { topY = topY, top = topPart }
+	end,
+}
+
+-- A sign: Posts(legs) + Board(shape) + Topper(back rule) + Trim.
+-- Town notice boards, the Town Bed's sign, building signposts. The board
+-- faces the front (-Z); `face` is a flat panel on it for writing on.
+KINDS.dsign = {
+	params = function(d, s, k)
+		local W = 6 * s
+		local boardH = W * 0.55
+		local postH = 3.6
+		local crest = if d.back == 1 then 0 else 1.3
+		return { w = W + 0.4, d = 1.2, h = postH + boardH + crest + 0.3, W = W, boardH = boardH, postH = postH, crest = crest }
+	end,
+	build = function(B, P, d, p, k, n)
+		local W, bh, ph = p.W, p.boardH, p.postH
+		local t = 0.3 + 0.08 * k
+		local dia = 0.34 * k
+		local cy = ph + bh / 2
+		local topY = ph + bh
+		-- posts: two up the board's sides, or one pedestal under it
+		if d.legs == 6 then
+			legs(B, P, 6, {}, 0, ph, dia, 1.8)
+		else
+			B.cyl("SignFoot", dia * 2.2, -(W / 2 - 0.45), 0, 0.16, 0, shade(P.frame, -0.15), P.frameMat, true)
+			B.cyl("SignFoot", dia * 2.2, W / 2 - 0.45, 0, 0.16, 0, shade(P.frame, -0.15), P.frameMat, true)
+			legs(B, P, d.legs, { Vector3.new(-(W / 2 - 0.45), 0, 0.12), Vector3.new(W / 2 - 0.45, 0, 0.12) }, 0, topY - 0.2, dia, 1)
+		end
+		-- the board, in the shape rule's outline
+		local col, mat = P.top, P.topMat
+		local edge = shade(col, -0.18)
+		local up = CFrame.Angles(math.pi / 2, 0, 0)
+		if d.shape == 1 then
+			B.box("SignBoard", W, bh, t, 0, cy, 0, col, mat, true)
+			B.box("SignBoardEdge", W + 0.2, 0.2, t + 0.06, 0, topY, 0, edge, mat)
+			B.box("SignBoardEdge", W + 0.2, 0.2, t + 0.06, 0, ph, 0, edge, mat)
+		elseif d.shape == 2 then
+			B.slab("SignBoard", W, t, bh, 0, cy, 0, col, mat, true, math.min(W, bh) * 0.3, up)
+		elseif d.shape == 3 then
+			B.box("SignBoard", W * 0.7, bh * 0.7, t * 0.9, 0, cy, 0, col, mat, true)
+			B.egg("SignBoard", W * 1.08, bh * 1.15, t, 0, cy, 0, col, mat)
+		elseif d.shape == 4 then
+			-- a leaf, its tip to one side, with a midrib and veins
+			B.box("SignBoard", W * 0.7, bh * 0.7, t * 0.9, 0, cy, 0, col, mat, true)
+			B.egg("SignBoard", W * 1.12, bh * 1.1, t, 0, cy, 0, col, mat)
+			local rib = shade(col, 0.3)
+			B.box("SignBoardRib", W * 0.98, 0.1, t + 0.04, 0, cy - bh * 0.42, 0, rib, mat)
+			for i = -1, 1 do
+				B.box("SignBoardVein", bh * 0.3, 0.08, t + 0.04, i * W * 0.25, cy - bh * 0.32, 0, rib, mat, false, CFrame.Angles(0, 0, 0.7))
+			end
+		elseif d.shape == 5 then
+			-- a scalloped flower edge round a soft board
+			B.slab("SignBoard", W * 0.92, t, bh * 0.9, 0, cy, 0, col, mat, true, math.min(W, bh) * 0.35, up)
+			local count = math.clamp(math.floor((W + bh) * 1.4), 10, 22)
+			for i = 0, count - 1 do
+				local a = i / count * TAU
+				local px, py = math.cos(a) * W * 0.47, math.sin(a) * bh * 0.47
+				B.egg("SignBoardPetal", 0.9, 0.7, t * 0.8, px, cy + py, 0.04, if i % 2 == 0 then col else shade(col, 0.15), mat, CFrame.Angles(0, 0, a))
+			end
+		else
+			-- a hexagonal board: pointed at both ends
+			local R = bh / SQRT3
+			B.box("SignBoard", W - R, bh, t, 0, cy, 0, col, mat, true)
+			for _, sx in { -1, 1 } do
+				local x = sx * (W / 2 - R / 2)
+				B.box("SignBoard", R * 0.72, R * 0.72, t * 0.98, x, cy, 0, col, mat, false, CFrame.Angles(0, 0, math.pi / 4))
+			end
+		end
+		-- the panel written on, a little in front of the board
+		local fw, fh = W * 0.8, bh * 0.68
+		local from = #B.parts
+		B.box("SignFace", fw, fh, 0.06, 0, cy, -t / 2 - 0.04, shade(col, 0.32), SMOOTH)
+		local face = B.parts[from + 1]
+		-- the topper: the back rule standing on the board
+		if p.crest > 0 then
+			back(B, P, d.back, W * 0.7, p.crest, topY - 0.05, 0.05, dia * 0.7, true)
+		end
+		trim(B, P, d.trim, 1, W, t + 0.1, topY, nil, nil, nil, nil, nil, true)
+		return { face = face, faceW = fw, faceH = fh, topY = topY }
+	end,
+}
+
+-- A pole: Foot + Pole(legs) + Arm(back rule) + Finial(shape) + Trim.
+-- Washing-line posts and the like. `top` is where a line ties on.
+KINDS.dpole = {
+	params = function(d, s, k)
+		local H = 8.8
+		return { w = 1.6 * s + 0.6, d = 1.4, h = H + 1.2, H = H, arm = 1.6 * s }
+	end,
+	build = function(B, P, d, p, k, n)
+		local H = p.H
+		local dia = 0.36 * k
+		local base = 1.2 + (k - 1) * 0.4
+		B.cyl("PoleFoot", base, 0, 0, 0.2, 0, shade(P.frame, -0.15), P.frameMat, true)
+		if d.legs == 6 then
+			legs(B, P, 6, {}, 0, H, dia, base)
+		else
+			legs(B, P, d.legs, { Vector3.zero }, 0.2, H, dia, base)
+		end
+		local tie = Vector3.new(0, H - 0.5, 0)
+		-- the arm: a crossbar with a peg at each end (none: the line ties to the pole)
+		if d.back ~= 1 then
+			local a = p.arm
+			B.logX("PoleArm", a, dia * 0.8, 0, H - 0.5, 0, P.top, P.topMat)
+			for _, sx in { -1, 1 } do
+				B.cyl("PolePeg", dia * 0.6, sx * a / 2, H - 0.5, H - 0.1, 0, shade(P.frame, -0.1), P.frameMat)
+			end
+			if d.back == 4 or d.back == 5 then
+				B.egg("PoleArmLeaf", a * 0.6, 0.14, 0.5, 0, H - 0.3, 0, P.leaf, M.leaf)
+			end
+		end
+		-- the finial, in the shape rule
+		local fy = H + 0.1
+		local col, mat = P.top, P.topMat
+		if d.shape == 1 then
+			B.box("PoleFinial", 0.7, 0.7, 0.7, 0, fy + 0.25, 0, col, mat)
+		elseif d.shape == 2 then
+			B.ball("PoleFinial", 0.9, 0, fy + 0.35, 0, col, mat)
+		elseif d.shape == 3 then
+			B.egg("PoleFinial", 1.4, 0.7, 1.4, 0, fy + 0.3, 0, col, mat)
+			B.cyl("PoleFinial", 0.4, 0, fy - 0.1, fy + 0.15, 0, shade(col, -0.2), mat)
+		elseif d.shape == 4 then
+			B.egg("PoleFinial", 0.5, 1.4, 0.18, 0, fy + 0.6, 0, P.leaf, M.leaf, CFrame.Angles(0, 0, 0.3))
+		elseif d.shape == 5 then
+			for i = 0, 4 do
+				local a = i / 5 * TAU
+				B.egg("PoleFinial", 0.6, 0.18, 0.36, math.cos(a) * 0.3, fy + 0.25, math.sin(a) * 0.3, if i % 2 == 0 then P.trim else col, M.petal, CFrame.Angles(0, -a, 0.3))
+			end
+			B.ball("PoleFinial", 0.36, 0, fy + 0.3, 0, P.glow, M.center)
+		else
+			hex(B, "PoleFinial", 0.45, 0.5, 0, fy + 0.25, 0, col, mat)
+		end
+		trim(B, P, d.trim, 3, dia * 2.2, dia * 2.2, H * 0.62, nil, nil, nil, nil, nil, true)
+		return { top = tie, arm = if d.back ~= 1 then p.arm else 0 }
 	end,
 }
 
