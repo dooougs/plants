@@ -37,7 +37,7 @@ Procedural plants for Roblox, extracted from Plant World.
   from the building, so every client agrees.
   There are 13 decor styles plus Mix & Match (Acorn Lodge, Fern Grotto,
   Beetle Shell, Dewdrop, Thistledown, Pebble Brook and Ember Hearth came in
-  0.1.11, after Mix & Match so saved recipes keep their style).
+  0.1.12, after Mix & Match so saved recipes keep their style).
 - **RoomTidy**: suggests a better arrangement of a room's pieces by interior
   design rules (after Merrell et al. 2011, "Interactive Furniture Layout
   Using Interior Design Guidelines").
@@ -46,7 +46,7 @@ Procedural plants for Roblox, extracted from Plant World.
 
 ```toml
 [dependencies]
-Plants = "dooougs/plants@0.1.11"
+Plants = "dooougs/plants@0.1.12"
 ```
 
 ## Use
