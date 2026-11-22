@@ -29,6 +29,12 @@ Procedural plants for Roblox, extracted from Plant World.
   Town signs (`dsign`: posts, board, topper, trim, with a `face` panel to
   write on) and washing-line poles (`dpole`) are grammar kinds too, so a
   town's decorations match its furniture.
+  Rooms needn't share their building's style: about 4 in 10 pick their own
+  (`FurnitureRules.roomStyle`), and a big room may be split into two zones,
+  the far one in a second style (`roomZones`, `Furniture.zone`). Sets that go
+  together (a table and its chairs, a bed and its bedside chest, a fire and
+  its armchairs: `FurnitureRules.SETS`) always match. All of it is seeded
+  from the building, so every client agrees.
 - **RoomTidy**: suggests a better arrangement of a room's pieces by interior
   design rules (after Merrell et al. 2011, "Interactive Furniture Layout
   Using Interior Design Guidelines").
@@ -37,7 +43,7 @@ Procedural plants for Roblox, extracted from Plant World.
 
 ```toml
 [dependencies]
-Plants = "dooougs/plants@0.1.9"
+Plants = "dooougs/plants@0.1.10"
 ```
 
 ## Use

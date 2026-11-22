@@ -349,6 +349,71 @@ function FurnitureRules.groupStyle(seed: number): Group
 	}
 end
 
+-- Rooms of one building needn't all share its style: about ROOM_OWN of
+-- them pick one of their own (still from the building's seed, so every
+-- client agrees). Big rooms are sometimes split into two zones, the far
+-- one in a second style (FurnitureRules.roomZones).
+FurnitureRules.ROOM_OWN = 0.4
+FurnitureRules.ZONE_CHANCE = 0.45 -- at most, for the biggest rooms
+
+local function mixSeed(a: number, b: number, c: number): number
+	return (a * 31 + b * 104729 + c * 7919 + 17) % 2147483000
+end
+
+-- A group style other than `g`, from `seed` (a few tries).
+local function otherStyle(g: Group, seed: number): Group
+	local h = FurnitureRules.groupStyle(seed)
+	for i = 1, 4 do
+		if h.style ~= g.style then
+			break
+		end
+		h = FurnitureRules.groupStyle(mixSeed(seed, i, 991))
+	end
+	return h
+end
+
+-- The style of room `room` in a building of style seed `seed`: the
+-- building's own, or one of the room's.
+function FurnitureRules.roomStyle(seed: number, room: number): Group
+	local house = FurnitureRules.groupStyle(seed)
+	local next = lcg(mixSeed(seed, room, 3))
+	next(1, 2)
+	if next(1, 1000) <= FurnitureRules.ROOM_OWN * 1000 then
+		return otherStyle(house, mixSeed(seed, room, 5))
+	end
+	return house
+end
+
+export type Zones = { axis: string, at: number, group: Group, far: boolean }
+
+-- Whether room `room` (half sizes ax, az in normal studs, its style `g`) is
+-- split into two zones: the side past `at` along `axis` ("x" or "z") takes
+-- `group`, a second style (the side below it when `far`). Nil for one zone. Bigger rooms split more often.
+function FurnitureRules.roomZones(seed: number, room: number, ax: number, az: number, g: Group): Zones?
+	local area = 4 * ax * az
+	local chance = math.clamp((area - 60) / 160, 0, 1) * FurnitureRules.ZONE_CHANCE
+	local next = lcg(mixSeed(seed, room, 11))
+	next(1, 2)
+	if chance <= 0 or next(1, 1000) > chance * 1000 then
+		return nil
+	end
+	local axis = if ax >= az then "x" else "z"
+	local half = if axis == "x" then ax else az
+	local at = (next(0, 100) / 100 - 0.5) * half * 0.5
+	local flip = next(1, 2) == 1
+	return { axis = axis, at = at, group = otherStyle(g, mixSeed(seed, room, 13)), far = flip }
+end
+
+-- Pieces that always match the piece they go with, whatever zone they
+-- stand in: the follower kinds of each set and how near (normal studs) a
+-- leader must be.
+FurnitureRules.SETS = {
+	{ leaders = { dtable = true, table = true, roundTable = true, gameTable = true, desk = true }, followers = { dchair = true, dstool = true, stool = true, dbench = true, bench = true, armchair = true, beanbag = true }, reach = 5 },
+	{ leaders = { dbed = true, bed = true, bunk = true, mossbed = true }, followers = { chest = true, dlamp = true, lantern = true, basket = true }, reach = 4.5 },
+	{ leaders = { fireplace = true, stove = true }, followers = { armchair = true, dchair = true, rug = true, beanbag = true }, reach = 6 },
+	{ leaders = { dshelf = true, shelf = true }, followers = { dshelf = true, shelf = true, desk = true }, reach = 4.5 },
+}
+
 -- The recipe of one piece of kind `id` in group style `g`, from its seed.
 -- `fixed` sets some rules outright (a counter's size to fit its hall).
 function FurnitureRules.groupRecipe(g: Group, id: string, seed: number, fixed: { [string]: number }?): string
