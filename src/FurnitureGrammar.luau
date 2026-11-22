@@ -1209,14 +1209,14 @@ end
 
 -- Grows grown piece `id` (its own `base` build) dressed in design `p.styled`
 -- (on feet `p.lift` high, see FurnitureGrammar.liftOf).
-function FurnitureGrammar.dress(id: string, B, c: any, p: any, base: (any, any, any, any) -> any, rng: any): any
+function FurnitureGrammar.dress(id: string, B, c: any, p: any, base: (...any) -> any, rng: any, ...): any
 	local d = p.styled
 	local P = FurnitureGrammar.palette(d, c)
 	local lift = p.lift or 0
 	local spec = DRESS[id]
 	local o = if spec then spec(p) else nil
 	local body = if lift > 0 then lifted(B, lift) else B
-	local made = base(tinted(body, P), styleColours(P, c), p, rng)
+	local made = base(tinted(body, P), styleColours(P, c), p, rng, ...)
 	if o then
 		local k = WEIGHT[d.weight]
 		local s = SIZE[d.size]

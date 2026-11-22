@@ -1679,12 +1679,18 @@ PIECES.plinth = {
 }
 
 -- The drafts table and its two stools share one footprint and placement.
+-- Hard rule: a drafts table is never without its two matching stools, one
+-- at each end facing the board (a game needs a player each side). They are
+-- part of the piece, so wherever the table fits they fit, and the footprint
+-- keeps SIT_ROOM clear behind each stool so you can get on it; if that
+-- doesn't fit, the table isn't placed at all.
+local SIT_ROOM = 0.6
 PIECES.gameTable = {
 	place = "free", access = 0, sideways = true,
 	params = function(rng)
 		local stool = PIECES.stool.params(Random.new(rng:NextInteger(1, RoomFurniture.SEED_MAX)))
 		local seatZ = (Drafts.TOP + stool.d) / 2 + 0.35
-		return { w = Drafts.TOP, d = 2 * seatZ + stool.d, h = 2.8, stool = stool, seatZ = seatZ }
+		return { w = Drafts.TOP, d = 2 * (seatZ + SIT_ROOM) + stool.d, h = 2.8, stool = stool, seatZ = seatZ }
 	end,
 	build = function(B, c, p)
 		-- an 8x8 drafts board; the pieces are drawn by Client.DraftsClient
@@ -1781,11 +1787,13 @@ PIECES.fireplace = {
 -- (its lid, doors, light, seat) is unchanged.
 for id, piece in PIECES do
 	local base = piece.build
-	piece.build = function(B, c, p, rng)
+	-- (extra arguments pass through: the drafts table builds its two stools
+	-- with a z offset each, and dropping it stacked both inside the table)
+	piece.build = function(B, c, p, rng, ...)
 		if p and p.styled then
-			return FurnitureGrammar.dress(id, B, c, p, base, rng)
+			return FurnitureGrammar.dress(id, B, c, p, base, rng, ...)
 		end
-		return base(B, c, p, rng)
+		return base(B, c, p, rng, ...)
 	end
 end
 
