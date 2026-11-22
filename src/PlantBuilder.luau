@@ -1294,6 +1294,7 @@ local function makeContext(genome, progress: number, options, model: Model?)
 		v = v,
 		plantId = options.plantId,
 		keepOut = if type(options.keepOut) == "table" and #options.keepOut > 0 then options.keepOut else nil, -- other plants' rooms, in world studs (see steerClear)
+		yieldTo = if type(options.yieldTo) == "table" and #options.yieldTo > 0 then options.yieldTo else nil, -- older plants' rooms this one gives way to, world studs (see yieldIn)
 		visualOnly = options.visualOnly == true,
 		building = options.building, -- the anchor's Building kind, if any (Furniture picks room purposes by it)
 		roomUses = Furniture.parseUses(options.roomUses), -- "0=bedroom,1=kitchen": rooms whose owner picked a purpose
@@ -1480,6 +1481,24 @@ local function ownRoomBoxes(ctx, start: CFrame, spread, rooms: { [number]: numbe
 	return boxes
 end
 
+-- Older plants' rooms (options.yieldTo: { cf at the room's floor, halfX,
+-- halfZ, top } in world studs) in a grammar layout's frame, for its main
+-- stem and room shoots to lean round (Layout plan.yield). nil if none.
+local function yieldIn(ctx, baseCF: CFrame, frame: CFrame): { any }?
+	if not ctx.yieldTo then
+		return nil
+	end
+	local bp = baseCF.Position
+	local list = {}
+	for _, b in ctx.yieldTo do
+		if typeof(b.cf) == "CFrame" and type(b.halfX) == "number" and type(b.halfZ) == "number" and type(b.top) == "number" then
+			local design = CFrame.new(bp + (b.cf.Position - bp) / WORLD) * b.cf.Rotation
+			table.insert(list, { cf = frame:ToObjectSpace(design), halfX = b.halfX / WORLD, halfZ = b.halfZ / WORLD, top = b.top / WORLD })
+		end
+	end
+	return if #list > 0 then list else nil
+end
+
 -- Other plants' rooms (ctx.keepOutBoxes, not own) in a grammar layout's
 -- frame (start), for PlantSynth to grow its shoots round (Layout plan.avoid).
 local function avoidFor(ctx, start: CFrame): { any }
@@ -1558,7 +1577,13 @@ end
 -- axis climbable the way the classic main stem is.
 local function growSynth(ctx, start: CFrame, laidOut: any?)
 	-- (In a real build its shoots grow round other plants' rooms.)
-	local L = laidOut or PlantSynth.layout(ctx.genome, ctx.p, ctx.seed, ctx.examples, if ctx.model then { rooms = {}, avoid = avoidFor(ctx, start) } else nil)
+	-- (and it gives way to older plants' rooms, ctx.yieldTo, in every build).
+	local L = laidOut
+	if not L then
+		local yields = yieldIn(ctx, ctx.upright, start)
+		local plan = if ctx.model or yields then { rooms = {}, avoid = if ctx.model then avoidFor(ctx, start) else nil, yield = yields } else nil
+		L = PlantSynth.layout(ctx.genome, ctx.p, ctx.seed, ctx.examples, plan)
+	end
 	local function at(v: Vector3): Vector3
 		return start:PointToWorldSpace(v)
 	end
@@ -1769,7 +1794,7 @@ local function run(ctx, baseCF: CFrame)
 	if building and Genome.roomsAnywhere(ctx.genome) then
 		plan = PlantSynth.roomPlan(ctx.genome, ctx.seed, ctx.examples, ctx.maxRooms, ctx.breathe)
 		if plan then
-			spread = PlantSynth.layout(ctx.genome, p, ctx.seed, ctx.examples, { rooms = plan.rooms, pruned = plan.pruned, swell = ctx.habitatSwell })
+			spread = PlantSynth.layout(ctx.genome, p, ctx.seed, ctx.examples, { rooms = plan.rooms, pruned = plan.pruned, swell = ctx.habitatSwell, yield = yieldIn(ctx, baseCF, baseCF) })
 		end
 	end
 	local rooms = if building and not spread then Habitat.plan(g, N, ctx.rng(5153, 0), ctx.maxRooms) else nil
@@ -1790,6 +1815,10 @@ local function run(ctx, baseCF: CFrame)
 	end
 	if lift > 0 then
 		start = baseCF + Vector3.new(0, lift, 0)
+		if spread and plan and ctx.yieldTo then
+			-- the older rooms again, from where the lifted plant now stands
+			spread = PlantSynth.layout(ctx.genome, p, ctx.seed, ctx.examples, { rooms = plan.rooms, pruned = plan.pruned, swell = ctx.habitatSwell, yield = yieldIn(ctx, baseCF, start) })
+		end
 		ctx.flexBase = lift
 		if not hall and ctx.model then
 			local d = thick * ctx.thickScale
@@ -1829,6 +1858,12 @@ local function run(ctx, baseCF: CFrame)
 		end
 	end
 
+	if ctx.roomsOnly then
+		-- PlantBuilder.roomBoxes: just where the rooms are
+		ctx.roomsOut = if building and ctx.habitatSwell then ownRoomBoxes(ctx, start, spread, rooms, N, internode, thick) else {}
+		return
+	end
+
 	-- This plant's own rooms join the keep-out boxes, so its own leaves grow
 	-- round them too (leaves set into a room's shell are left alone).
 	if ctx.model and building and ctx.habitatSwell then
@@ -1846,7 +1881,7 @@ local function run(ctx, baseCF: CFrame)
 		if ctx.model and plan then
 			-- Laid out again, its side shoots growing round other plants'
 			-- rooms and its own (the rooms themselves never move).
-			spread = PlantSynth.layout(ctx.genome, p, ctx.seed, ctx.examples, { rooms = plan.rooms, pruned = plan.pruned, swell = ctx.habitatSwell, avoid = avoidFor(ctx, start) })
+			spread = PlantSynth.layout(ctx.genome, p, ctx.seed, ctx.examples, { rooms = plan.rooms, pruned = plan.pruned, swell = ctx.habitatSwell, avoid = avoidFor(ctx, start), yield = yieldIn(ctx, baseCF, start) })
 		end
 		growSynth(ctx, start, spread)
 		return
@@ -2088,8 +2123,8 @@ function PlantBuilder.groundLift(genome, progress: number, baseCFrame: CFrame, o
 end
 
 -- Where the open flowers are, without building any parts (for server-side insects etc.).
-function PlantBuilder.flowerPoints(genome, progress: number, baseCFrame: CFrame): { any }
-	local ctx = makeContext(genome, progress, {}, nil)
+function PlantBuilder.flowerPoints(genome, progress: number, baseCFrame: CFrame, options: { [string]: any }?): { any }
+	local ctx = makeContext(genome, progress, options or {}, nil)
 	run(ctx, baseCFrame)
 	toWorld(ctx.flowers, baseCFrame)
 	return ctx.flowers
@@ -2098,8 +2133,8 @@ end
 -- The top of the plant's main stem in world studs, where a climber comes out
 -- (on its open flower, if it has one), and the open flowers, without building
 -- any parts. The crown is nil for a plant too young to have a stem yet.
-function PlantBuilder.crown(genome, progress: number, baseCFrame: CFrame): (Vector3?, { any })
-	local ctx = makeContext(genome, progress, {}, nil)
+function PlantBuilder.crown(genome, progress: number, baseCFrame: CFrame, options: { [string]: any }?): (Vector3?, { any })
+	local ctx = makeContext(genome, progress, options or {}, nil)
 	run(ctx, baseCFrame)
 	toWorld(ctx.flowers, baseCFrame)
 	local crown: Vector3? = nil
@@ -2108,6 +2143,31 @@ function PlantBuilder.crown(genome, progress: number, baseCFrame: CFrame): (Vect
 		crown = baseCFrame:PointToWorldSpace(rel * WORLD)
 	end
 	return crown, ctx.flowers
+end
+
+--[[
+	Where a building plant's rooms are once it's fully grown, in world studs:
+	{ { cf (the room's floor middle, Y up, door wall on +X), halfX, halfZ,
+	top } }, the boxes another plant's options.keepOut and options.yieldTo
+	take. options as for build (maxRooms: a home's rooms; yieldTo: the older
+	rooms this plant itself gave way to). Empty for a plant with no rooms.
+	No parts are made.
+]]
+function PlantBuilder.roomBoxes(genome, baseCFrame: CFrame, options: { [string]: any }?): { any }
+	local ctx = makeContext(genome, 1, options or {}, nil)
+	ctx.roomsOnly = true
+	run(ctx, baseCFrame)
+	local bp = baseCFrame.Position
+	local out = {}
+	for _, b in ctx.roomsOut or {} do
+		table.insert(out, {
+			cf = CFrame.new(bp + (b.cf.Position - bp) * WORLD) * b.cf.Rotation,
+			halfX = b.halfX * WORLD,
+			halfZ = b.halfZ * WORLD,
+			top = b.top * WORLD,
+		})
+	end
+	return out
 end
 
 --[[

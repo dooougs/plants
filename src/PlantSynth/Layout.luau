@@ -72,7 +72,9 @@ export type RoomAt = {
 -- avoid: rooms to grow round (see steerOut), in the plant's own frame; this
 -- plant's own rooms are added to them. nil: grow as always.
 export type Box = { cf: CFrame, halfX: number, halfZ: number, top: number, own: boolean? }
-export type Plan = { rooms: { [number]: number }, swell: number?, pruned: { [number]: any }?, avoid: { Box }? }
+-- yield: older plants' rooms this plant gives way to (see Layout.YIELD_PASSES):
+-- its main stem and room shoots lean out of their way, rooms riding along.
+export type Plan = { rooms: { [number]: number }, swell: number?, pruned: { [number]: any }?, avoid: { Box }?, yield: { Box }? }
 export type Leaf = { vid: number, kind: string, pos: Vector3, dir: Vector3, len: number, maturity: number, nodeT: number, stemD: number, sessile: boolean }
 export type Flower = { vid: number, pos: Vector3, dir: Vector3, scale: number, bud: number, bloom: number, pedicel: { a: Vector3, b: Vector3, d: number }?, az: number, top: boolean }
 export type Result = {
@@ -219,6 +221,61 @@ end
 -- Per plant and room plan: how much each side shoot carrying a room
 -- stretches below it (see Layout.layout).
 local stretches: { [Derive.Graph]: { [string]: { [number]: number } } } = setmetatable({}, { __mode = "k" }) :: any
+-- The leans worked out for a plant giving way to older rooms (Layout.yield):
+-- graph -> plan and boxes key -> axis id -> node index -> offset.
+local leans: { [Derive.Graph]: { [string]: { [number]: { [number]: Vector3 } } } } = setmetatable({}, { __mode = "k" }) :: any
+
+--[[
+	Giving way (plan.yield): a newer plant grows round older plants' rooms,
+	main stem and all. Worked out on the grown plant, a few passes over:
+	each pass finds where its main stem or a shoot carrying a room would
+	run into an older room, or one of its own rooms would overlap one, and
+	how far sideways that spot must move to clear it; the few stretches of
+	stem below the spot lean that far between them, carrying everything
+	above along (rooms, side shoots, the top flower). That can push some
+	other part into a room, so the next pass looks again. While the plant
+	is still growing each stretch leans in step with its growth. All of it
+	is a pure function of the genome and the boxes, so everyone agrees.
+]]
+Layout.YIELD_PASSES = 12
+Layout.YIELD_WINDOW = 4 -- stretches of stem below a spot that lean to clear it
+Layout.YIELD_PAD = 0.3 -- design studs of air kept between a stem or room and an older room
+
+local function boxKey(boxes: { Box }): string
+	local parts = {}
+	for _, b in boxes do
+		local x, y, z = b.cf.Position.X, b.cf.Position.Y, b.cf.Position.Z
+		local l = b.cf.LookVector
+		table.insert(parts, string.format("%.2f,%.2f,%.2f,%.3f,%.3f,%.2f,%.2f,%.2f", x, y, z, l.X, l.Z, b.halfX, b.halfZ, b.top))
+	end
+	return table.concat(parts, ";")
+end
+
+-- How far (plant frame) a circle of radius rr at p, spanning heights y0..y1,
+-- must move sideways to clear every box; zero if it already does.
+local function clearOf(boxes: { Box }, p: Vector3, rr: number, y0: number, y1: number): Vector3
+	local total = Vector3.zero
+	local pad = Layout.YIELD_PAD
+	for _, b in boxes do
+		local q = b.cf:PointToObjectSpace(p)
+		local lo, hi = q.Y + (y0 - p.Y), q.Y + (y1 - p.Y)
+		if hi > -pad and lo < b.top + pad and Layout.inFootprint(b, Vector3.new(q.X, 0, q.Z), rr + pad) then
+			local hx, hz = b.halfX + rr + pad, b.halfZ + rr + pad
+			local ux, uz = q.X, q.Z
+			local m = math.sqrt(ux * ux + uz * uz)
+			if m < 1e-3 then
+				ux, uz, m = 0, -1, 1
+			end
+			ux, uz = ux / m, uz / m
+			local tx = if ux > 1e-6 then (hx - q.X) / ux elseif ux < -1e-6 then (-hx - q.X) / ux else math.huge
+			local tz = if uz > 1e-6 then (hz - q.Z) / uz elseif uz < -1e-6 then (-hz - q.Z) / uz else math.huge
+			local t = math.min(tx, tz) + 0.05
+			local w = b.cf:VectorToWorldSpace(Vector3.new(ux, 0, uz) * t)
+			total += Vector3.new(w.X, 0, w.Z)
+		end
+	end
+	return total
+end
 
 function Layout.layout(G: Derive.Graph, g: { [string]: number }, p: number, plan: Plan?): Result
 	local out: Result = newResult()
@@ -231,6 +288,8 @@ function Layout.layout(G: Derive.Graph, g: { [string]: number }, p: number, plan
 	-- their internodes up to the room stretch (by a factor worked out on the
 	-- grown plant, so the shoot only ever lengthens as it grows).
 	local avoidBoxes: { Box }? = nil -- set below, once the plant's own rooms are known
+	local lean: { [number]: { [number]: Vector3 } } = {} -- axis id -> node index -> sideways offset (grown plant)
+	local trace: { any }? = nil -- while working out leans: every node on the main stem and room shoots
 	local roomAxes: { [number]: number } = {} -- axis id -> its first room's node index
 	local stretch: { [number]: number } = {}
 	local axisStart: { [number]: Vector3 } = {}
@@ -356,6 +415,14 @@ function Layout.layout(G: Derive.Graph, g: { [string]: number }, p: number, plan
 				end
 			end
 			local np = pos + d * len
+			local leanAt = lean[ax.id] and lean[ax.id][i]
+			if leanAt and not room then
+				-- giving way to an older room: lean with this stretch's growth
+				np += leanAt * (0.12 + 0.88 * ease(m))
+			end
+			if trace and (isMain or roomAxes[ax.id]) then
+				table.insert(trace, { axis = ax.id, i = i, a = pos, b = np, room = room, r = diam(i + 1) / 2 })
+			end
 			-- A room on the next node: this node is under its floor.
 			local below: Habitat.Room? = nil
 			local nextNd = ax.nodes[i + 2]
@@ -573,6 +640,97 @@ function Layout.layout(G: Derive.Graph, g: { [string]: number }, p: number, plan
 			roomOf = if swell then plan.rooms else nil
 		end
 		stretch = found
+	end
+	if plan and plan.yield and #plan.yield > 0 then
+		local vids = {}
+		for vid, n in plan.rooms do
+			table.insert(vids, vid * 8 + n)
+		end
+		table.sort(vids)
+		local key = table.concat(vids, ",") .. "|" .. boxKey(plan.yield)
+		local byKey = leans[G] or {}
+		leans[G] = byKey
+		local found = byKey[key]
+		if not found then
+			local p0, swell0, veg0, roomOf0 = p, swell, veg, roomOf
+			p, swell, veg = 1, 1, 1
+			roomOf = if next(plan.rooms) then plan.rooms else nil
+			local boxes = plan.yield
+			local L: { [number]: { [number]: Vector3 } } = {}
+			lean = L
+			for _ = 1, Layout.YIELD_PASSES do
+				trace = {}
+				walkAll()
+				local nodes = trace :: { any }
+				trace = nil
+				-- index the nodes of each axis, and find what must move
+				local byAxis: { [number]: { [number]: any } } = {}
+				for _, nd in nodes do
+					byAxis[nd.axis] = byAxis[nd.axis] or {}
+					byAxis[nd.axis][nd.i] = nd
+				end
+				-- one spot per axis each pass, the lowest: clearing it moves
+				-- everything above, so the rest are looked at again next pass
+				local done: { [number]: boolean } = {}
+				table.sort(nodes, function(x, y)
+					if x.axis ~= y.axis then
+						return x.axis < y.axis
+					end
+					return x.i < y.i
+				end)
+				local moved = false
+				for _, nd in nodes do
+					if done[nd.axis] then
+						continue
+					end
+					local push: Vector3
+					local at: number -- the node whose end must move
+					if nd.room then
+						-- a room: its foot (the node before it) moves it clear
+						local R = nd.room :: Habitat.Room
+						push = clearOf(boxes, nd.a, Layout.roomReach(R), nd.a.Y, nd.a.Y + R.topY)
+						at = nd.i - 1
+					else
+						local mid = (nd.a + nd.b) * 0.5
+						push = clearOf(boxes, nd.b, nd.r, math.min(nd.a.Y, nd.b.Y), math.max(nd.a.Y, nd.b.Y))
+						if push.Magnitude < 1e-4 then
+							push = clearOf(boxes, mid, nd.r, mid.Y, mid.Y)
+						end
+						at = nd.i
+					end
+					if push.Magnitude > 1e-4 and at >= 0 then
+						-- spread it over the plain stretches just below
+						local list = byAxis[nd.axis]
+						local free = {}
+						local j = at
+						while j >= 0 and #free < Layout.YIELD_WINDOW do
+							local seg = list[j]
+							if seg and not seg.room then
+								table.insert(free, j)
+							end
+							j -= 1
+						end
+						done[nd.axis] = true
+						if #free > 0 then
+							moved = true
+							local each = push / #free
+							local axisLean = L[nd.axis] or {}
+							L[nd.axis] = axisLean
+							for _, k in free do
+								axisLean[k] = (axisLean[k] or Vector3.zero) + each
+							end
+						end
+					end
+				end
+				if not moved then
+					break
+				end
+			end
+			found = L
+			byKey[key] = L
+			p, swell, veg, roomOf = p0, swell0, veg0, roomOf0
+		end
+		lean = found
 	end
 	if plan and plan.avoid then
 		-- Grow round rooms: other plants' (plan.avoid) and this plant's own,
